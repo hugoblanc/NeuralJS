@@ -1,17 +1,19 @@
 const datas = [
-    {values: [1, 0, 1, 0, 1, 0, 0, 0, 0], target:1},
-    {values: [0, 0, 0, 0, 0, 1, 1, 1, 1], target:0},
-    {values: [0, 1, 0, 1, 1, 0, 0, 0, 0], target:1},
-    {values: [0, 0, 0, 0, 1, 1, 1, 1, 1], target:0},
-    {values: [1, 0, 1, 1, 1, 0, 0, 0, 0], target:1},
-    {values: [0, 0, 0, 0, 1, 1, 0, 1, 1], target:0},
+    { values: [1, 0, 1, 0, 1, 0, 0, 0, 0], target: 1 },
+    { values: [0, 0, 0, 0, 0, 1, 1, 1, 1], target: 0 },
+    { values: [0, 1, 0, 1, 1, 0, 0, 0, 0], target: 1 },
+    { values: [0, 0, 0, 0, 1, 1, 1, 1, 1], target: 0 },
+    { values: [1, 0, 1, 1, 1, 0, 0, 0, 0], target: 1 },
+    { values: [0, 0, 0, 0, 1, 1, 0, 1, 1], target: 0 },
 ];
-const velocity = 0.00000001;
+const velocity = 0.000001;
+
+
+let globActivateCounter = 0;
 
 function sigmoid(x) {
     return 1 / (1 + Math.pow(Math.E, -x))
 }
-
 function derivedSigmoid(x) {
     return sigmoid(x) * (1 - sigmoid(x));
 }
@@ -36,17 +38,25 @@ class Neuron {
 
         this.sum = total;
         this.activation = sigmoid(total);
+        globActivateCounter++;
         return this.activation;
     }
 }
 
 
 class Network {
-    constructor(nbIn, nb1, nb2) {
+    constructor(...nb) {
+        if (nb.length <= 1) {
+            throw new Error('You motherfucker are forgeting some layers')
+        }
         this.layers = [];
-        this.layers.push(this.createLayer(nbIn, nb1))
-        this.layers.push(this.createLayer(nb1, 1))
-        // this.layers.push(this.createLayer(nb2, 1))
+        for (let i = 0; i < nb.length - 1; i++) {
+            const prevLayer = nb[i];
+            const nextLayer = nb[i];
+            this.layers.push(this.createLayer(prevLayer, nextLayer))
+
+        }
+        this.layers.push(this.createLayer(nb[nb.length - 1], 1))
     }
 
     createLayer(nbParent, nbNeurons) {
@@ -77,7 +87,7 @@ class Network {
             for (let i = 0; i < prevLayer.length; i++) {
                 const prevNeuron = prevLayer[i];
                 let derivedPrevWeightCost = this.derivedCost(r, prevNeuron, target);
-                r.weights[i] += derivedPrevWeightCost * velocity;
+                r.weights[i] -= derivedPrevWeightCost * velocity;
             }
         }
     }
@@ -94,19 +104,17 @@ class Network {
 }
 
 
-const network = new Network(datas[0].values.length, 16, 16);
+const network = new Network(datas[0].values.length, 9);
 
 let result;
 
-for (let i= 0; i < 10; i++) {
-
-    
-    console.log(datas[i%datas.length].values);
-    result = network.activate(datas[i%datas.length].values);
-    console.log(result, 'should be => '+datas[i%datas.length].target);
-    network.backPropagation(datas[i%datas.length].target)
+for (let i = 0; i < 500000; i++) {
+    result = network.activate(datas[i % datas.length].values);
+    console.log(result, 'should be => ' + datas[i % datas.length].target);
+    network.backPropagation(datas[i % datas.length].target)
 }
 
 
 
-// console.log(datas[0].values);
+
+console.log("Neuron activation" + globActivateCounter);
