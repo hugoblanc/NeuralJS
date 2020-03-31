@@ -1,13 +1,14 @@
 var util = require('util')
+const chalk = require('chalk');
+var beep = require('beepbeep')
+
 const datas = [
-    { values: [1], target: 1 },
-    { values: [0], target: 0 },
-    // { values: [0, 1, 0, 1, 1, 0, 0, 0, 0], target: 1 },
-    // { values: [0, 0, 0, 0, 1, 1, 1, 1, 1], target: 0 },
-    // { values: [1, 0, 1, 1, 1, 0, 0, 0, 0], target: 1 },
-    // { values: [0, 0, 0, 0, 1, 1, 0, 1, 1], target: 0 },
+    { values: [1], target: [1, 0] },
+    { values: [0], target: [0, 1] },
+    // { values: [0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], target: [1, 0] },
+    // { values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1], target: [0,1] },
 ];
-const velocity = 0.1;
+const velocity = 0.001;
 
 
 let globActivateCounter = 0;
@@ -30,25 +31,36 @@ class Neuron {
         this.sum = 0;
         this.activation = 0;
         this.childSynapses = [];
+        this.bias = 0;
         for (let i = 0; i < nbParents; i++) {
             const parentNeuron = parentLayer[i] ? parentLayer[i] : null;
-            this.synapses.push({ weight: i===0 ? 1 : (Math.random() - 1) * 2, parentNeuron });
+            this.synapses.push({ weight: parentNeuron == null ? 1 : (Math.random() - 1) * 2, parentNeuron });
             if (parentNeuron) {
                 parentNeuron.childSynapses.push(this);
             }
         }
     }
 
+
+    toString() {
+        console.log(`synapses:${this.synapses.map((s, i) => 'w' + i + ' ' + s.weight).join('--')} sum:${this.sum} activation:${this.activation} bias:${this.bias}`);
+
+    }
+
     activate(inputs) {
         let total = 0;
         for (let i = 0; i < inputs.length; i++) {
             const weight = this.synapses[i] ? this.synapses[i].weight : 1;
+
             const wN = inputs[i] * weight;
             total += wN;
         }
 
-        this.sum = total;
+        // console.log(total);
+        this.sum = total + this.bias;
         this.activation = sigmoid(total);
+        // console.log(this.activation);
+
         globActivateCounter++;
         return this.activation;
     }
@@ -67,10 +79,16 @@ class Network {
             // console.log(prevLayer,' and ', nextLayer);
 
             this.layers.push(this.createLayer(prevLayer, nextLayer))
-
         }
-        this.addFinalLayer(this.layers[this.layers.length - 1]);
+    }
 
+    toString() {
+        for (let i = 0; i < this.layers.length; i++) {
+            const layer = this.layers[i];
+            console.log("-----------------------------------");
+            console.log("Layer n° " + i);
+            layer.map((n, i) => 'Neuron n°' + i + ' ' + n.toString()).join('\n');
+        }
     }
 
     createLayer(nbParent, nbNeurons) {
@@ -82,19 +100,20 @@ class Network {
         return layer;
     }
 
-    addFinalLayer(prevLayer) {
-        this.layers.push(this.createLayer(prevLayer.length, 1))
-    }
-
     activate(inputs, layerIndex = 0) {
 
         if (layerIndex === this.layers.length) {
             return inputs;
         }
 
-        const accFuncResults = [];
+
+
+        let accFuncResults = [];
         for (const neuron of this.layers[layerIndex]) {
             accFuncResults.push(neuron.activate(inputs));
+        }
+        if (layerIndex === 0) {
+            accFuncResults = inputs;
         }
         return this.activate(accFuncResults, ++layerIndex);
     }
@@ -103,17 +122,17 @@ class Network {
     backPropagationBis(target) {
         const lastLayer = this.layers[this.layers.length - 1];
 
+        let count = 0;
         for (const finalNeuron of lastLayer) {
             // console.log(finalNeuron);
-            const dC = 2 * (finalNeuron.activation - target);
+            const dC = 2 * (finalNeuron.activation - target[count]);
             for (const synapse of finalNeuron.synapses) {
-                const dCostPZ = this.derivedCostPartialZ(dC, synapse);
                 localRecursive = 0;
-                // console.log(++localRecursive);
-
+                const dCostPZ = derivedSigmoid(synapse.parentNeuron.sum) * dC;
                 this.recPropagation(dC, finalNeuron, dCostPZ, synapse);
                 localRecursive = 0;
             }
+            count++;
         }
     }
 
@@ -126,39 +145,81 @@ class Network {
         if (youngestSynapse.parentNeuron == null) return;
         const parentNeuron = youngestSynapse.parentNeuron;
         let oldWeight = youngestSynapse.weight;
+        // console.log(`yW:${youngestSynapse.weight} dCostPZ${dCostPZ}  pNAc ${parentNeuron.activation} `);
+        // TODO: Quand plus confiant, foutre des vrai opérateur JS
+        youngestSynapse.bias = youngestSynapse.bias + (dCostPZ) * (-velocity);
         youngestSynapse.weight = youngestSynapse.weight + (dCostPZ * parentNeuron.activation) * (-velocity);
-        // console.log(`Chaine size: ${synapses.length} last${oldWeight} new ${youngestSynapse.weight}  diff ${youngestSynapse.weight - oldWeight}`);
+        // console.log(`Local: ${localRecursive} Chaine size: ${synapses.length} last${oldWeight} new ${youngestSynapse.weight}  diff ${youngestSynapse.weight - oldWeight}`);
 
         if (parentNeuron.synapses == null) return;
         for (let i = 0; i < parentNeuron.synapses.length; i++) {
             const pSynapse = parentNeuron.synapses[i];
             if (pSynapse.parentNeuron !== null) {
-                dCostPZ = this.derivedCostPartialZ(dC, pSynapse) * youngestSynapse.weight * dCostPZ;
+                dCostPZ = derivedSigmoid(pSynapse.parentNeuron.sum) * youngestSynapse.weight * dCostPZ;
                 this.recPropagation(dC, finalNeuron, dCostPZ, ...synapses, pSynapse)
             }
         }
     }
 
-    derivedCostPartialZ(dC, synapse) {
-        globCostCalcul++;
-        const dS = derivedSigmoid(synapse.parentNeuron.sum);
-        // const prevActivation = synapse.parentNeuron.activation;
-        return dC * dS;
-    }
 
 }
 
 
-const network = new Network(datas[0].values.length, 2, 5, 10);
+const network = new Network(datas[0].values.length, 2, 3, 2, datas[0].target.length);
 // console.log(network);
 
-let result;
-for (let i = 0; i < 30000; i++) {
-    result = network.activate(datas[i % datas.length].values);
-    // console.log(util.inspect(network, {depth: 10}));
-    console.log(result, 'Predict => ', (result > 0.5) ? 1 : 0,  ' should be => ' + datas[i % datas.length].target);
-    network.backPropagationBis(datas[i % datas.length].target)
-    // console.log(util.inspect(network, {depth: 10}));
+const rl = require('readline');
+
+function clearLine(dist) {
+    rl.cursorTo(process.stdout, dist);
+    rl.clearLine(process.stdout, dist);
+}
+
+function showPrecision(pValue) {
+    const percent = pValue * 100;
+    let line = `Precision: ${Number.parseFloat(percent).toFixed(3)}% [ `
+    let i = 0;
+    while (i < 100) {
+        if (i < percent) {
+            line += '>';
+        } else {
+            line += ' ';
+        }
+        i++;
+    }
+    line += ']';
+    return line;
+}
+
+
+for (let i = 0; i < 1000000; i++) {
+    const currentData = datas[i % datas.length];
+    const target = currentData.target;
+    const values = currentData.values;
+
+    const result = network.activate(values);
+
+    let totalPrecision = 0;
+    for (let i = 0; i < values.length; i++) {
+        const cV = target[i];
+        const cR = result[i];
+        totalPrecision += 1 - Math.abs(cV - cR);
+    }
+    totalPrecision = totalPrecision / values.length;
+    const strPrecision = showPrecision(totalPrecision);
+
+    clearLine(2)
+    // process.stdout.write(chalk.bgGreen(`Result => ${Number.parseFloat(result).toFixed(5)} Target => ${Number.parseFloat(target).toFixed(5)}`));
+    clearLine(-2)
+    process.stdout.write(chalk.bgGreen(strPrecision));
+
+
+    // process.stdout.write();
+
+
+
+
+    network.backPropagationBis(target)
 }
 
 
