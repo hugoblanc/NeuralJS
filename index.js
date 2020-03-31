@@ -31,7 +31,7 @@ class Neuron {
         this.sum = 0;
         this.activation = 0;
         this.childSynapses = [];
-        this.bias = 0;
+        this.bias = 1;
         for (let i = 0; i < nbParents; i++) {
             const parentNeuron = parentLayer[i] ? parentLayer[i] : null;
             this.synapses.push({ weight: parentNeuron == null ? 1 : (Math.random() - 1) * 2, parentNeuron });
@@ -165,7 +165,7 @@ class Network {
 }
 
 
-const network = new Network(datas[0].values.length, 2, 3, 2, datas[0].target.length);
+const network = new Network(datas[0].values.length, 4, datas[0].target.length);
 // console.log(network);
 
 const rl = require('readline');
@@ -175,21 +175,34 @@ function clearLine(dist) {
     rl.clearLine(process.stdout, dist);
 }
 
-function showPrecision(pValue) {
+const precision = [];
+function showPrecision(pValue, target, result) {
     const percent = pValue * 100;
-    let line = `Precision: ${Number.parseFloat(percent).toFixed(3)}% [ `
+    if (precision.length > 10) {
+        precision.unshift();
+    }
+    precision.push(percent);
+    let total = 0;
+    for (let p of precision) {
+        total += p;
+    }
+    total = total / precision.length;
+
+    let line = `Precision: ${Number.parseFloat(total).toFixed(3)}%  Target => ${Number.parseFloat(target[0]).toFixed(3)} Result => ${Number.parseFloat(result[0]).toFixed(3)} [`
     let i = 0;
     while (i < 100) {
-        if (i < percent) {
-            line += '>';
-        } else {
-            line += ' ';
+        if (i % 2 === 0) {
+            if (i < total) {
+                line += '>';
+            } else {
+                line += ' ';
+            }
         }
         i++;
     }
-    line += ']';
+    line += ']  Activation: ' + globActivateCounter;
 
-    line = chalk.bgRgb(Math.ceil(254 - percent), Math.ceil(100 + percent), 0)(line)
+    line = chalk.bgRgb(Math.ceil(254 - 254 * (total / 100)), Math.ceil(254 * (total / 100)), 0)(line)
 
     return line;
 }
@@ -211,7 +224,7 @@ for (let i = 0; i < 100000000; i++) {
     totalPrecision = totalPrecision / values.length;
 
     if (i % 3 === 0) {
-        const strPrecision = showPrecision(totalPrecision);
+        const strPrecision = showPrecision(totalPrecision, target, result);
         clearLine(0)
         process.stdout.write(strPrecision);
     }
