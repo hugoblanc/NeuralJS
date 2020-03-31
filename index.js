@@ -5,10 +5,10 @@ var beep = require('beepbeep')
 const datas = [
     { values: [1], target: [1, 0] },
     { values: [0], target: [0, 1] },
-    // { values: [0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], target: [1, 0] },
-    // { values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1], target: [0,1] },
+    // { values: [0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], target: [1, 0] },
+    // { values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1], target: [0, 1] },
 ];
-const velocity = 0.001;
+const velocity = 0.005;
 
 
 let globActivateCounter = 0;
@@ -188,11 +188,14 @@ function showPrecision(pValue) {
         i++;
     }
     line += ']';
+
+    line = chalk.bgRgb(Math.ceil(254 - percent), Math.ceil(100 + percent), 0)(line)
+
     return line;
 }
 
 
-for (let i = 0; i < 1000000; i++) {
+for (let i = 0; i < 100000000; i++) {
     const currentData = datas[i % datas.length];
     const target = currentData.target;
     const values = currentData.values;
@@ -206,12 +209,12 @@ for (let i = 0; i < 1000000; i++) {
         totalPrecision += 1 - Math.abs(cV - cR);
     }
     totalPrecision = totalPrecision / values.length;
-    const strPrecision = showPrecision(totalPrecision);
 
-    clearLine(2)
-    // process.stdout.write(chalk.bgGreen(`Result => ${Number.parseFloat(result).toFixed(5)} Target => ${Number.parseFloat(target).toFixed(5)}`));
-    clearLine(-2)
-    process.stdout.write(chalk.bgGreen(strPrecision));
+    if (i % 3 === 0) {
+        const strPrecision = showPrecision(totalPrecision);
+        clearLine(0)
+        process.stdout.write(strPrecision);
+    }
 
 
     // process.stdout.write();
