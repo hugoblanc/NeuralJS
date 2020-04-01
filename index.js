@@ -1,6 +1,14 @@
-var util = require('util')
 const chalk = require('chalk');
-var beep = require('beepbeep')
+
+
+const rl = require('readline');
+
+function clearLine(dist) {
+    rl.cursorTo(process.stdout, dist);
+    rl.clearLine(process.stdout, dist);
+}
+
+
 
 const datas = [
     { values: [1], target: [1, 0] },
@@ -11,10 +19,16 @@ const datas = [
 const velocity = 0.005;
 
 
+// Last ten precision values
+
+
+
+
+// COUNTER - ANALYTICS
+
 let globActivateCounter = 0;
 let globRecursiveCounter = 0;
 let globCostCalcul = 0;
-
 let localRecursive = 0;
 
 function sigmoid(x) {
@@ -56,10 +70,8 @@ class Neuron {
             total += wN;
         }
 
-        // console.log(total);
         this.sum = total + this.bias;
         this.activation = sigmoid(total);
-        // console.log(this.activation);
 
         globActivateCounter++;
         return this.activation;
@@ -76,7 +88,6 @@ class Network {
         for (let i = 0; i < nb.length; i++) {
             const prevLayer = nb[(i > 0 ? i - 1 : 0)];
             const nextLayer = nb[i];
-            // console.log(prevLayer,' and ', nextLayer);
 
             this.layers.push(this.createLayer(prevLayer, nextLayer))
         }
@@ -124,7 +135,6 @@ class Network {
 
         let count = 0;
         for (const finalNeuron of lastLayer) {
-            // console.log(finalNeuron);
             const dC = 2 * (finalNeuron.activation - target[count]);
             for (const synapse of finalNeuron.synapses) {
                 localRecursive = 0;
@@ -145,11 +155,10 @@ class Network {
         if (youngestSynapse.parentNeuron == null) return;
         const parentNeuron = youngestSynapse.parentNeuron;
         let oldWeight = youngestSynapse.weight;
-        // console.log(`yW:${youngestSynapse.weight} dCostPZ${dCostPZ}  pNAc ${parentNeuron.activation} `);
+
         // TODO: Quand plus confiant, foutre des vrai opérateur JS
         youngestSynapse.bias = youngestSynapse.bias + (dCostPZ) * (-velocity);
         youngestSynapse.weight = youngestSynapse.weight + (dCostPZ * parentNeuron.activation) * (-velocity);
-        // console.log(`Local: ${localRecursive} Chaine size: ${synapses.length} last${oldWeight} new ${youngestSynapse.weight}  diff ${youngestSynapse.weight - oldWeight}`);
 
         if (parentNeuron.synapses == null) return;
         for (let i = 0; i < parentNeuron.synapses.length; i++) {
@@ -165,29 +174,27 @@ class Network {
 }
 
 
-const network = new Network(datas[0].values.length, 4, datas[0].target.length);
-// console.log(network);
+const network = new Network(datas[0].values.length,4, datas[0].target.length);
 
-const rl = require('readline');
-
-function clearLine(dist) {
-    rl.cursorTo(process.stdout, dist);
-    rl.clearLine(process.stdout, dist);
-}
 
 const precision = [];
+trainNetwork();
+
+
+
 function showPrecision(pValue, target, result) {
     const percent = pValue * 100;
     if (precision.length > 10) {
         precision.unshift();
     }
     precision.push(percent);
+
     let total = 0;
     for (let p of precision) {
         total += p;
     }
     total = total / precision.length;
-
+    
     let line = `Precision: ${Number.parseFloat(total).toFixed(3)}%  Target => ${Number.parseFloat(target[0]).toFixed(3)} Result => ${Number.parseFloat(result[0]).toFixed(3)} [`
     let i = 0;
     while (i < 100) {
@@ -202,45 +209,56 @@ function showPrecision(pValue, target, result) {
     }
     line += ']  Activation: ' + globActivateCounter;
 
-    line = chalk.bgRgb(Math.ceil(254 - 254 * (total / 100)), Math.ceil(254 * (total / 100)), 0)(line)
+    line = chalk.bgRgb(Math.ceil(150 - 150 * (total / 100)), Math.ceil(150 * (total / 100)), 0)(line)
 
     return line;
 }
 
 
-for (let i = 0; i < 100000000; i++) {
-    const currentData = datas[i % datas.length];
-    const target = currentData.target;
-    const values = currentData.values;
 
-    const result = network.activate(values);
 
-    let totalPrecision = 0;
-    for (let i = 0; i < values.length; i++) {
-        const cV = target[i];
-        const cR = result[i];
-        totalPrecision += 1 - Math.abs(cV - cR);
+
+
+function trainNetwork(){
+    for (let i = 0; i < 100000000; i++) {
+        const currentData = datas[i % datas.length];
+        const target = currentData.target;
+        const values = currentData.values;
+    
+        const result = network.activate(values);
+    
+        
+        let totalPrecision = 0;
+        for (let i = 0; i < target.length; i++) {
+            const cV = target[i];
+            const cR = result[i];
+            
+            totalPrecision += 1 - Math.abs(cV - cR);
+        }
+        totalPrecision = totalPrecision / target.length;
+    
+        if (i % 3 === 0) {
+            const strPrecision = showPrecision(totalPrecision, target, result);
+            clearLine(0)
+            process.stdout.write(strPrecision);
+        }
+    
+        network.backPropagationBis(target)
     }
-    totalPrecision = totalPrecision / values.length;
-
-    if (i % 3 === 0) {
-        const strPrecision = showPrecision(totalPrecision, target, result);
-        clearLine(0)
-        process.stdout.write(strPrecision);
-    }
-
-
-    // process.stdout.write();
-
-
-
-
-    network.backPropagationBis(target)
+    
 }
-
 
 
 
 console.log("Neuron activation" + globActivateCounter);
 console.log("BackProp recursive call" + globRecursiveCounter);
 console.log("Cost derived calculation" + globCostCalcul);
+
+
+
+
+
+
+
+
+
