@@ -11,12 +11,12 @@ function clearLine(dist) {
 
 
 const datas = [
-    { values: [1], target: [1, 0] },
-    { values: [0], target: [0, 1] },
+    { values: [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1], target: [0, 1] },
+    { values: [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0], target: [1, 0] },
     // { values: [0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], target: [1, 0] },
     // { values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1], target: [0, 1] },
 ];
-const velocity = 0.005;
+const velocity = 0.8;
 
 
 // Last ten precision values
@@ -174,7 +174,7 @@ class Network {
 }
 
 
-const network = new Network(datas[0].values.length,4, datas[0].target.length);
+const network = new Network(datas[0].values.length, 150, datas[0].target.length);
 
 
 const precision = [];
@@ -194,7 +194,7 @@ function showPrecision(pValue, target, result) {
         total += p;
     }
     total = total / precision.length;
-    
+
     let line = `Precision: ${Number.parseFloat(total).toFixed(3)}%  Target => ${Number.parseFloat(target[0]).toFixed(3)} Result => ${Number.parseFloat(result[0]).toFixed(3)} [`
     let i = 0;
     while (i < 100) {
@@ -219,33 +219,33 @@ function showPrecision(pValue, target, result) {
 
 
 
-function trainNetwork(){
+function trainNetwork() {
     for (let i = 0; i < 100000000; i++) {
         const currentData = datas[i % datas.length];
         const target = currentData.target;
         const values = currentData.values;
-    
+
         const result = network.activate(values);
-    
-        
+
+
         let totalPrecision = 0;
         for (let i = 0; i < target.length; i++) {
             const cV = target[i];
             const cR = result[i];
-            
+
             totalPrecision += 1 - Math.abs(cV - cR);
         }
         totalPrecision = totalPrecision / target.length;
-    
+
         if (i % 3 === 0) {
             const strPrecision = showPrecision(totalPrecision, target, result);
             clearLine(0)
             process.stdout.write(strPrecision);
         }
-    
+
         network.backPropagationBis(target)
     }
-    
+
 }
 
 
