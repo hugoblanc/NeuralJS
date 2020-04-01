@@ -11,12 +11,18 @@ function clearLine(dist) {
 
 
 const datas = [
-    { values: [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1], target: [0, 1] },
-    { values: [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0], target: [1, 0] },
+    { values: [1,0,1,1,0], target: [1, 0] },
+    { values: [0,1,1,1,1], target: [1, 0] },
+    { values: [1,0,1,0,1], target: [1, 0] },
+    { values: [1,0,0,0,1], target: [0, 1] },
+    { values: [1,0,1,0,0], target: [0, 1] },
+    { values: [0,1,0,1,0], target: [0, 1] },
+    // { values: [0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1], target: [0, 1] },
+    // { values: [1, 1, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0], target: [1, 0] },
     // { values: [0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0], target: [1, 0] },
     // { values: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1, 1, 0, 1, 1], target: [0, 1] },
 ];
-const velocity = 0.8;
+const velocity = 0.82;
 
 
 // Last ten precision values
@@ -38,6 +44,23 @@ function derivedSigmoid(x) {
     return sigmoid(x) * (1 - sigmoid(x));
 }
 
+function reLU(x) {
+    return (x > 0) ? x : 0;
+}
+
+function derivedReLU(x) {
+    return (x > 0) ? 1 : 0;
+}
+
+function activationFunction(x) {
+    return sigmoid(x);
+}
+
+function derivedActivationFunction(x) {
+    return derivedSigmoid(x);
+}
+
+
 class Neuron {
     constructor(nbParents, parentLayer = []) {
         // Init synapses
@@ -45,7 +68,7 @@ class Neuron {
         this.sum = 0;
         this.activation = 0;
         this.childSynapses = [];
-        this.bias = 1;
+        this.bias = 0;
         for (let i = 0; i < nbParents; i++) {
             const parentNeuron = parentLayer[i] ? parentLayer[i] : null;
             this.synapses.push({ weight: parentNeuron == null ? 1 : (Math.random() - 1) * 2, parentNeuron });
@@ -71,7 +94,7 @@ class Neuron {
         }
 
         this.sum = total + this.bias;
-        this.activation = sigmoid(total);
+        this.activation = activationFunction(total);
 
         globActivateCounter++;
         return this.activation;
@@ -138,7 +161,7 @@ class Network {
             const dC = 2 * (finalNeuron.activation - target[count]);
             for (const synapse of finalNeuron.synapses) {
                 localRecursive = 0;
-                const dCostPZ = derivedSigmoid(synapse.parentNeuron.sum) * dC;
+                const dCostPZ = derivedActivationFunction(synapse.parentNeuron.sum) * dC;
                 this.recPropagation(dC, finalNeuron, dCostPZ, synapse);
                 localRecursive = 0;
             }
@@ -154,17 +177,15 @@ class Network {
 
         if (youngestSynapse.parentNeuron == null) return;
         const parentNeuron = youngestSynapse.parentNeuron;
-        let oldWeight = youngestSynapse.weight;
 
-        // TODO: Quand plus confiant, foutre des vrai opérateur JS
-        youngestSynapse.bias = youngestSynapse.bias + (dCostPZ) * (-velocity);
-        youngestSynapse.weight = youngestSynapse.weight + (dCostPZ * parentNeuron.activation) * (-velocity);
+        youngestSynapse.bias -= (dCostPZ) * (velocity);
+        youngestSynapse.weight -= (dCostPZ * parentNeuron.activation) * (velocity);
 
         if (parentNeuron.synapses == null) return;
         for (let i = 0; i < parentNeuron.synapses.length; i++) {
             const pSynapse = parentNeuron.synapses[i];
             if (pSynapse.parentNeuron !== null) {
-                dCostPZ = derivedSigmoid(pSynapse.parentNeuron.sum) * youngestSynapse.weight * dCostPZ;
+                dCostPZ = derivedActivationFunction(pSynapse.parentNeuron.sum) * youngestSynapse.weight * dCostPZ;
                 this.recPropagation(dC, finalNeuron, dCostPZ, ...synapses, pSynapse)
             }
         }
@@ -209,7 +230,7 @@ function showPrecision(pValue, target, result) {
     }
     line += ']  Activation: ' + globActivateCounter;
 
-    line = chalk.bgRgb(Math.ceil(150 - 150 * (total / 100)), Math.ceil(150 * (total / 100)), 0)(line)
+    line = chalk.bgRgb(Math.ceil(240 - 150 * (total / 100)), Math.ceil(130 * (total / 100)), 0)(line)
 
     return line;
 }
