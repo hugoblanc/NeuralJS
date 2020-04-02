@@ -7,8 +7,12 @@ export class Synapse {
 
     constructor(parentNeuron: Neuron) {
         this.parentNeuron = parentNeuron;
-        this.weight = (Math.random() - 1) * 2;
+        this.weight = (Math.random() * 2) - 1;
     }
+
+
+
+
 
     toString(): string {
         return decimal(this.weight, 4);
