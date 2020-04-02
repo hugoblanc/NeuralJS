@@ -12,6 +12,12 @@ export class Network {
     }
 
 
+    activate(inputs: number[]){
+
+    }
+
+
+
     toString(): string {
         return this.layers.map(
             (l, i) => `

@@ -8,8 +8,13 @@ export class Layer {
         this.neurons = doNTimes(nbNeurons, () => new Neuron(prevLayer))
     }
 
+    activate(inputs: number[]): number[] {
+
+    }
+
+
     toString(): string {
-        return this.neurons.map((n,i) => `Neuron ${i}: ${n.toString()}`).join(' \n');
+        return this.neurons.map((n, i) => `Neuron ${i}: ${n.toString()}`).join(' \n');
     }
 
 }
