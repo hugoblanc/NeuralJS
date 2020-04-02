@@ -10,4 +10,17 @@ export class Network {
             this.layers.push(prevLayer);
         }
     }
+
+
+    toString(): string {
+        return this.layers.map(
+            (l, i) => `
+------------------------------------------------------------------------------------
+Layer n° ${i}
+------------------------
+${l.toString()}
+`
+        ).join('');
+
+    }
 }

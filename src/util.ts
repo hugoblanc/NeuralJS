@@ -6,3 +6,8 @@ export const doNTimes: <t>(n: number, callback: (index: number) => t) => t[] = <
     return result;
 }
 
+
+export const decimal = (n: number, limit: number) => {
+    // tslint:disable-next-line: no-construct
+    return (new Number(n)).toFixed(limit);
+}
