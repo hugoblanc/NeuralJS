@@ -1,6 +1,7 @@
 import * as readline from 'readline';
 import { Network } from './network';
-import { DATASETS } from './datasets';
+import { Dataset, DATASETS, Sample } from './datasets';
+import { loadMnist, evaluate } from './mnist';
 
 // --- Arg parsing ---
 
@@ -31,6 +32,7 @@ Options:
   --iterations <n>    Max iterations (default: 50000)
   --hidden <n>        Hidden layer size (default: 8)
   --layers <n,n,...>  Custom architecture (e.g. 8,5,3,5,8)
+  --samples <n>       Training samples for MNIST (default: 1000)
   --inspect           Show bottleneck activations after training
   --debug             Show full network state instead of progress bar
   --help              Show this help`);
@@ -40,20 +42,41 @@ Options:
 // --- Config ---
 
 const datasetKey = (flags.dataset as string) || 'xor';
-const dataset = DATASETS[datasetKey];
-if (!dataset) {
+if (!DATASETS[datasetKey]) {
   console.error(`Unknown dataset "${datasetKey}". Available: ${Object.keys(DATASETS).join(', ')}`);
   process.exit(1);
 }
 
 const learningRate = parseFloat(flags.lr as string) || 0.5;
-const maxIterations = parseInt(flags.iterations as string, 10) || 50000;
 const hiddenSize = parseInt(flags.hidden as string, 10) || 8;
 const debug = !!flags.debug;
 const inspect = !!flags.inspect;
 
-const inputSize = dataset.samples[0].inputs.length;
-const outputSize = dataset.samples[0].target.length;
+// --- Load dataset ---
+
+let samples: Sample[];
+let testSamples: Sample[] | undefined;
+let description: string;
+let recommendedLayers: number[] | undefined;
+
+if (datasetKey === 'mnist') {
+  const sampleCount = parseInt(flags.samples as string, 10) || 1000;
+  const mnist = loadMnist(sampleCount, Math.ceil(sampleCount / 5));
+  samples = mnist.train;
+  testSamples = mnist.test;
+  description = DATASETS[datasetKey].description;
+  recommendedLayers = [784, 128, 10];
+} else {
+  const ds = DATASETS[datasetKey] as Dataset;
+  samples = ds.samples;
+  description = ds.description;
+  recommendedLayers = ds.recommendedLayers;
+}
+
+const maxIterations = parseInt(flags.iterations as string, 10) || (datasetKey === 'mnist' ? 100000 : 50000);
+
+const inputSize = samples[0].inputs.length;
+const outputSize = samples[0].target.length;
 
 let layers: number[];
 if (flags.layers) {
@@ -66,13 +89,13 @@ if (flags.layers) {
     console.error(`Last layer (${layers[layers.length - 1]}) must match output size (${outputSize})`);
     process.exit(1);
   }
-} else if (dataset.recommendedLayers) {
-  layers = dataset.recommendedLayers;
+} else if (recommendedLayers) {
+  layers = recommendedLayers;
 } else {
   layers = [inputSize, hiddenSize, outputSize];
 }
 
-console.log(`Dataset: ${datasetKey} - ${dataset.description}`);
+console.log(`Dataset: ${datasetKey} - ${description}`);
 console.log(`Network: ${layers.join(' -> ')}  |  LR: ${learningRate}  |  Iterations: ${maxIterations}\n`);
 
 // --- Display ---
@@ -83,7 +106,7 @@ function bgColor(r: number, g: number, b: number, text: string): string {
 
 const precisionHistory: number[] = [];
 
-function displayProgress(precision: number, target: number[], result: number[]): void {
+function displayProgress(precision: number, target: number[], result: number[], iteration: number): void {
   precisionHistory.push(precision * 100);
   if (precisionHistory.length > 10) precisionHistory.shift();
   const avg = precisionHistory.reduce((a, b) => a + b) / precisionHistory.length;
@@ -92,9 +115,22 @@ function displayProgress(precision: number, target: number[], result: number[]):
   const filled = Math.round((avg / 100) * barWidth);
   const bar = '█'.repeat(filled) + '░'.repeat(barWidth - filled);
 
-  const targetStr = target.map(t => t.toFixed(0)).join(' ');
-  const resultStr = result.map(r => r.toFixed(3)).join(' ');
-  const line = ` ${avg.toFixed(1)}% ${bar}  T:[${targetStr}]  R:[${resultStr}] `;
+  const predicted = result.indexOf(Math.max(...result));
+  const actual = target.indexOf(1);
+  const classInfo = target.length > 2 ? `  ${actual}->${predicted}` : '';
+
+  const targetStr = target.length <= 8
+    ? `T:[${target.map(t => t.toFixed(0)).join(' ')}]`
+    : `T:${actual}`;
+  const resultStr = target.length <= 8
+    ? `R:[${result.map(r => r.toFixed(3)).join(' ')}]`
+    : `P:${predicted} (${(result[predicted] * 100).toFixed(0)}%)`;
+
+  const epochInfo = samples.length > 10
+    ? `[${Math.floor(iteration / samples.length) + 1}e] `
+    : '';
+
+  const line = ` ${epochInfo}${avg.toFixed(1)}% ${bar}  ${targetStr}  ${resultStr}${classInfo} `;
 
   const r = Math.round(200 - 150 * (avg / 100));
   const g = Math.round(130 * (avg / 100));
@@ -109,7 +145,7 @@ function displayProgress(precision: number, target: number[], result: number[]):
 const network = new Network(layers);
 
 for (let i = 0; i < maxIterations; i++) {
-  const sample = dataset.samples[i % dataset.samples.length];
+  const sample = samples[i % samples.length];
   const result = network.forward(sample.inputs);
 
   let precision = 0;
@@ -121,13 +157,19 @@ for (let i = 0; i < maxIterations; i++) {
   if (debug) {
     console.log(network.toString());
   } else {
-    displayProgress(precision, sample.target, result);
+    displayProgress(precision, sample.target, result, i);
   }
 
   network.backpropagate(sample.target, learningRate);
 }
 
 console.log('');
+
+// --- Evaluate on test set ---
+
+if (testSamples && testSamples.length > 0) {
+  evaluate(network, testSamples);
+}
 
 // --- Inspect bottleneck ---
 
@@ -136,14 +178,19 @@ if (inspect) {
   const bottleneckSize = network.layers[bottleneckIndex].neurons.length;
   console.log(`\nBottleneck (layer ${bottleneckIndex}, ${bottleneckSize} neurons):\n`);
 
-  for (const sample of dataset.samples) {
+  const inspectSamples = samples.length > 20 ? samples.slice(0, 20) : samples;
+  for (const sample of inspectSamples) {
     network.forward(sample.inputs);
     const bottleneck = network.layers[bottleneckIndex].neurons.map(n => n.activation);
     const rounded = bottleneck.map(v => Math.round(v));
     const output = network.outputLayer.neurons.map(n => n.activation);
 
+    const inputStr = sample.inputs.length > 20
+      ? `digit ${sample.target.indexOf(1)}`
+      : `[${sample.inputs.join('')}]`;
+
     console.log(
-      `  Input: [${sample.inputs.join('')}]` +
+      `  Input: ${inputStr}` +
       `  Bottleneck: [${bottleneck.map(v => v.toFixed(3)).join(', ')}]` +
       `  ~ [${rounded.join('')}]` +
       `  Output: [${output.map(v => v.toFixed(3)).join(', ')}]`,

@@ -9,7 +9,11 @@ export interface Dataset {
   recommendedLayers?: number[];
 }
 
-export const DATASETS: Record<string, Dataset> = {
+export const DATASETS: Record<string, Dataset | { description: string }> = {
+
+  mnist: {
+    description: 'MNIST handwritten digits 0-9 (run: npm run download-mnist first)',
+  },
 
   xor: {
     description: 'XOR gate - non-linearly separable, needs a hidden layer',
