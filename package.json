@@ -1,16 +1,20 @@
 {
   "name": "neural",
-  "version": "1.0.0",
-  "description": "",
-  "main": "index.js",
+  "version": "2.0.0",
+  "description": "Pedagogical neural network from scratch in TypeScript",
+  "main": "dist/index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "build": "tsc",
+    "train": "tsc && node dist/index.js",
+    "legacy": "node index.js"
   },
   "author": "",
   "license": "ISC",
   "dependencies": {
     "chalk": "^3.0.0",
-    "tslint": "^6.1.1",
-    "typescript": "^3.8.3"
+    "typescript": "^5.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1"
   }
 }

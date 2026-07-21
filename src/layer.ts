@@ -1,20 +1,10 @@
 import { Neuron } from './neuron';
-import { doNTimes } from './util';
+
 export class Layer {
+  neurons: Neuron[];
 
-    neurons: Neuron[];
-
-    constructor(nbNeurons: number, prevLayer?: Layer) {
-        this.neurons = doNTimes(nbNeurons, () => new Neuron(prevLayer))
-    }
-
-    activate(inputs: number[]): number[] {
-
-    }
-
-
-    toString(): string {
-        return this.neurons.map((n, i) => `Neuron ${i}: ${n.toString()}`).join(' \n');
-    }
-
+  constructor(size: number, parentLayer?: Layer) {
+    const parents = parentLayer?.neurons;
+    this.neurons = Array.from({ length: size }, () => new Neuron(parents));
+  }
 }

@@ -1,43 +1,65 @@
 const chalk = require('chalk');
-
-const dataSet1 = require('./dataset/dataset1')
-const dataSet2 = require('./dataset/dataset2')
-const dataSet3 = require('./dataset/dataset3')
-
 const rl = require('readline');
+
+const DATASETS = {
+    '1':       { file: './dataset/dataset1',           desc: 'Simple binary (2 in, 1 out)' },
+    '2':       { file: './dataset/dataset2',           desc: 'Multi-feature (5 in, 2 out)' },
+    '3':       { file: './dataset/dataset3',           desc: 'Dense pattern (16 in, 2 out)' },
+    'xor':     { file: './dataset/dataset4_xor',       desc: 'XOR gate' },
+    'parity':  { file: './dataset/dataset5_parity',    desc: 'Parity check (4 bits)' },
+    'digits':  { file: './dataset/dataset6_digits',    desc: 'Digit recognition 0-4 (3x5 grid)' },
+    'add':     { file: './dataset/dataset7_binary_add', desc: 'Binary addition (2+2 bits)' },
+    'auto':    { file: './dataset/dataset8_autoencoder', desc: 'Autoencoder 8->3->8 (use --layers 8,5,3,5,8)' },
+};
+
+const args = process.argv.slice(2);
+const flags = {};
+for (let i = 0; i < args.length; i++) {
+    if (args[i].startsWith('--')) {
+        const key = args[i].slice(2);
+        flags[key] = args[i + 1] || true;
+        i++;
+    } else if (!flags.dataset) {
+        flags.dataset = args[i];
+    }
+}
+
+if (flags.help || flags.h) {
+    console.log(`Usage: node index.js [dataset] [options]
+
+Datasets: ${Object.entries(DATASETS).map(([k, v]) => `\n  ${k.padEnd(10)} ${v.desc}`).join('')}
+
+Options:
+  --lr <n>          Learning rate (default: 0.5)
+  --iterations <n>  Max iterations (default: 50000)
+  --hidden <n>      Hidden layer size (default: 8)
+  --layers <n,n,..> Custom layer sizes (e.g. 8,5,3,5,8 for autoencoder)
+  --debug           Show full network state instead of progress bar
+  --inspect         After training, show bottleneck activations per sample
+  --help            Show this help`);
+    process.exit(0);
+}
+
+const datasetKey = flags.dataset || 'xor';
+if (!DATASETS[datasetKey]) {
+    console.error(`Unknown dataset "${datasetKey}". Available: ${Object.keys(DATASETS).join(', ')}`);
+    process.exit(1);
+}
+const datas = require(DATASETS[datasetKey].file);
+console.log(`Dataset: ${datasetKey} - ${DATASETS[datasetKey].desc}`);
+
+let velocity = parseFloat(flags.lr) || 0.5;
+const MAX_ITERATIONS = parseInt(flags.iterations) || 50000;
+const HIDDEN_SIZE = parseInt(flags.hidden) || 8;
+const mode = flags.debug ? 'DEBUG' : 'PRESENTATION';
 
 function clearLine(dist) {
     rl.cursorTo(process.stdout, dist);
     rl.clearLine(process.stdout, dist);
 }
 
-
-const MODE_DEBUG = 'DEBUG';
-const MODE_PRESENTATION = 'PRESENTATION';
-
-
-let mode = MODE_DEBUG;
-mode = MODE_PRESENTATION;
-
-
-
-
-
-
-// const datas = dataSet1;
-// const datas = dataSet2;
-const datas = dataSet3;
-
-let velocity = 13.820002;
-let lastTotalPrecision = 0;
-
-
-// COUNTER - ANALYTICS
-
 let globActivateCounter = 0;
 let globRecursiveCounter = 0;
-let globCostCalcul = 0;
-let localRecursive = 0;
 
 function sigmoid(x) {
     return 1 / (1 + Math.pow(Math.E, -x))
@@ -73,7 +95,7 @@ class Neuron {
         this.bias = 1;
         for (let i = 0; i < nbParents; i++) {
             const parentNeuron = parentLayer[i] ? parentLayer[i] : null;
-            this.synapses.push({ weight: parentNeuron == null ? 1 : (Math.random() - 1) * 2, parentNeuron });
+            this.synapses.push({ weight: parentNeuron == null ? 1 : (Math.random() * 2) - 1, parentNeuron });
             if (parentNeuron) {
                 parentNeuron.childSynapses.push(this);
             }
@@ -96,7 +118,7 @@ class Neuron {
         }
 
         this.sum = total + this.bias;
-        this.activation = activationFunction(total);
+        this.activation = activationFunction(this.sum);
 
         globActivateCounter++;
         return this.activation;
@@ -139,57 +161,54 @@ class Network {
         return layer;
     }
 
-    activate(inputs, layerIndex = 0) {
-
-        if (layerIndex === this.layers.length) {
-            return inputs;
+    activate(inputs) {
+        const inputLayer = this.layers[0];
+        for (let i = 0; i < inputLayer.length; i++) {
+            inputLayer[i].activation = inputs[i];
+            inputLayer[i].sum = inputs[i];
         }
 
-
-
-        let accFuncResults = [];
-        for (const neuron of this.layers[layerIndex]) {
-            accFuncResults.push(neuron.activate(inputs));
-        }
-        if (layerIndex === 0) {
-            accFuncResults = inputs;
-        }
-        return this.activate(accFuncResults, ++layerIndex);
-    }
-
-
-    backPropagationBis(target) {
-        const lastLayer = this.layers[this.layers.length - 1];
-
-        let count = 0;
-        for (const finalNeuron of lastLayer) {
-            const dC = 2 * (finalNeuron.activation - target[count]);
-            for (const synapse of finalNeuron.synapses) {
-                localRecursive = 0;
-                const dCostPZ = derivedActivationFunction(synapse.parentNeuron.sum) * dC;
-                this.recPropagation(dC, dCostPZ, synapse);
-                localRecursive = 0;
+        for (let l = 1; l < this.layers.length; l++) {
+            for (const neuron of this.layers[l]) {
+                let total = 0;
+                for (const synapse of neuron.synapses) {
+                    total += synapse.parentNeuron.activation * synapse.weight;
+                }
+                neuron.sum = total + neuron.bias;
+                neuron.activation = activationFunction(neuron.sum);
             }
-            count++;
         }
+
+        return this.layers[this.layers.length - 1].map(n => n.activation);
     }
 
 
-    recPropagation(dC, dCostPZ, ...synapses) {
-        globRecursiveCounter++;
-        const youngestSynapse = synapses[synapses.length - 1];
+    backPropagate(target) {
+        const outputLayer = this.layers[this.layers.length - 1];
 
+        for (let i = 0; i < outputLayer.length; i++) {
+            const neuron = outputLayer[i];
+            const dCda = 2 * (neuron.activation - target[i]);
+            neuron.delta = dCda * derivedActivationFunction(neuron.sum);
+        }
 
-        if (youngestSynapse.parentNeuron == null) return;
-        const parentNeuron = youngestSynapse.parentNeuron;
-        parentNeuron.bias -= (dCostPZ) * (velocity);
-        youngestSynapse.weight -= (dCostPZ * parentNeuron.activation) * (velocity);
+        for (let l = this.layers.length - 2; l >= 1; l--) {
+            for (let j = 0; j < this.layers[l].length; j++) {
+                const neuron = this.layers[l][j];
+                let errorSum = 0;
+                for (const nextNeuron of this.layers[l + 1]) {
+                    errorSum += nextNeuron.synapses[j].weight * nextNeuron.delta;
+                }
+                neuron.delta = errorSum * derivedActivationFunction(neuron.sum);
+            }
+        }
 
-        if (parentNeuron.synapses == null) return;
-        for (let i = 0; i < parentNeuron.synapses.length; i++) {
-            const pSynapse = parentNeuron.synapses[i];
-            if (pSynapse.parentNeuron !== null) {
-                this.recPropagation(dC, derivedActivationFunction(pSynapse.parentNeuron.sum) * youngestSynapse.weight * dCostPZ, ...synapses, pSynapse)
+        for (let l = 1; l < this.layers.length; l++) {
+            for (const neuron of this.layers[l]) {
+                neuron.bias -= neuron.delta * velocity;
+                for (const synapse of neuron.synapses) {
+                    synapse.weight -= neuron.delta * synapse.parentNeuron.activation * velocity;
+                }
             }
         }
     }
@@ -198,7 +217,22 @@ class Network {
 }
 
 
-const network = new Network(datas[0].values.length, 150, datas[0].target.length);
+let layerSizes;
+if (flags.layers) {
+    layerSizes = flags.layers.split(',').map(Number);
+    if (layerSizes[0] !== datas[0].values.length) {
+        console.error(`First layer (${layerSizes[0]}) must match input size (${datas[0].values.length})`);
+        process.exit(1);
+    }
+    if (layerSizes[layerSizes.length - 1] !== datas[0].target.length) {
+        console.error(`Last layer (${layerSizes[layerSizes.length - 1]}) must match target size (${datas[0].target.length})`);
+        process.exit(1);
+    }
+} else {
+    layerSizes = [datas[0].values.length, HIDDEN_SIZE, datas[0].target.length];
+}
+console.log(`Network: ${layerSizes.join(' -> ')}`);
+const network = new Network(...layerSizes);
 
 
 const precision = [];
@@ -244,7 +278,7 @@ function showPrecision(pValue, target, result) {
 
 
 function trainNetwork() {
-    for (let i = 0; i < 100000000; i++) {
+    for (let i = 0; i < MAX_ITERATIONS; i++) {
         const currentData = datas[i % datas.length];
         const target = currentData.target;
         const values = currentData.values;
@@ -260,8 +294,6 @@ function trainNetwork() {
 
             totalPrecision += (1 - Math.abs(cV - cR));
         }
-        console.log(totalPrecision);
-        
         totalPrecision = totalPrecision / target.length;
 
         // if(lastTotalPrecision < totalPrecision){
@@ -273,7 +305,7 @@ function trainNetwork() {
 
         // lastTotalPrecision = totalPrecision;
 
-        if (mode === MODE_PRESENTATION) {
+        if (mode === 'PRESENTATION') {
             // if (i % 3 === 0) {
                 const strPrecision = showPrecision(totalPrecision, target, result);
                 clearLine(0)
@@ -284,7 +316,7 @@ function trainNetwork() {
         }
 
 
-        network.backPropagationBis(target)
+        network.backPropagate(target)
         // console.log(network.toString());
     }
 
@@ -292,9 +324,24 @@ function trainNetwork() {
 
 
 
-console.log("Neuron activation" + globActivateCounter);
-console.log("BackProp recursive call" + globRecursiveCounter);
-console.log("Cost derived calculation" + globCostCalcul);
+console.log("\nNeuron activations: " + globActivateCounter);
+
+if (flags.inspect) {
+    const bottleneckIndex = Math.floor(network.layers.length / 2);
+    console.log(`\n--- Bottleneck inspection (layer ${bottleneckIndex}, ${network.layers[bottleneckIndex].length} neurons) ---\n`);
+    for (const sample of datas) {
+        network.activate(sample.values);
+        const bottleneck = network.layers[bottleneckIndex].map(n => n.activation);
+        const rounded = bottleneck.map(v => Math.round(v));
+        const output = network.layers[network.layers.length - 1].map(n => n.activation);
+        console.log(
+            `Input: [${sample.values.join('')}]` +
+            `  Bottleneck: [${bottleneck.map(v => v.toFixed(3)).join(', ')}]` +
+            `  ~ [${rounded.join('')}]` +
+            `  Output: [${output.map(v => v.toFixed(3)).join(', ')}]`
+        );
+    }
+}
 
 
 
