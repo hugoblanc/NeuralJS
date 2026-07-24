@@ -91,10 +91,11 @@ function oneHot(label: number, classes: number): number[] {
   return vec;
 }
 
-export function evaluate(network: { forward(inputs: number[]): number[] }, samples: Sample[]): void {
+export function evaluate(network: { forward(inputs: number[]): number[] }, samples: Sample[], showCount = 0): void {
   let correct = 0;
   const perClass = new Array(10).fill(0);
   const perClassTotal = new Array(10).fill(0);
+  const errors: { sample: Sample; predicted: number; confidence: number }[] = [];
 
   for (const sample of samples) {
     const result = network.forward(sample.inputs);
@@ -104,6 +105,8 @@ export function evaluate(network: { forward(inputs: number[]): number[] }, sampl
     if (predicted === actual) {
       correct++;
       perClass[actual]++;
+    } else {
+      errors.push({ sample, predicted, confidence: result[predicted] });
     }
   }
 
@@ -114,4 +117,49 @@ export function evaluate(network: { forward(inputs: number[]): number[] }, sampl
     const bar = '█'.repeat(Math.round(perClass[d] / Math.max(1, perClassTotal[d]) * 20));
     console.log(`  ${d}: ${pct.padStart(3)}%  ${bar}  (${perClass[d]}/${perClassTotal[d]})`);
   }
+
+  if (showCount <= 0) return;
+
+  // show some correct predictions
+  const shown = new Set<number>();
+  console.log('\n--- Correct predictions (never seen during training) ---');
+  for (const sample of samples) {
+    const result = network.forward(sample.inputs);
+    const predicted = result.indexOf(Math.max(...result));
+    const actual = sample.target.indexOf(1);
+    if (predicted === actual && !shown.has(actual)) {
+      shown.add(actual);
+      renderDigit(sample.inputs, actual, predicted, result[predicted]);
+      if (shown.size >= Math.min(showCount, 10)) break;
+    }
+  }
+
+  // show some errors
+  if (errors.length > 0) {
+    console.log('\n--- Errors ---');
+    for (const err of errors.slice(0, Math.min(3, showCount))) {
+      const actual = err.sample.target.indexOf(1);
+      renderDigit(err.sample.inputs, actual, err.predicted, err.confidence);
+    }
+  }
+}
+
+const SHADES = ' .:-=+*#%@';
+
+function renderDigit(pixels: number[], actual: number, predicted: number, confidence: number): void {
+  const ok = actual === predicted;
+  const label = ok
+    ? `  Actual: ${actual}  Predicted: ${predicted} ✓  (${(confidence * 100).toFixed(0)}%)`
+    : `  Actual: ${actual}  Predicted: ${predicted} ✗  (${(confidence * 100).toFixed(0)}%)`;
+  console.log(label);
+
+  for (let row = 0; row < 28; row++) {
+    let line = '  ';
+    for (let col = 0; col < 28; col++) {
+      const v = pixels[row * 28 + col];
+      line += SHADES[Math.min(Math.floor(v * SHADES.length), SHADES.length - 1)];
+    }
+    console.log(line);
+  }
+  console.log('');
 }

@@ -33,6 +33,7 @@ Options:
   --hidden <n>        Hidden layer size (default: 8)
   --layers <n,n,...>  Custom architecture (e.g. 8,5,3,5,8)
   --samples <n>       Training samples for MNIST (default: 1000)
+  --show <n>          Show n test predictions as ASCII art (MNIST)
   --inspect           Show bottleneck activations after training
   --debug             Show full network state instead of progress bar
   --help              Show this help`);
@@ -168,7 +169,8 @@ console.log('');
 // --- Evaluate on test set ---
 
 if (testSamples && testSamples.length > 0) {
-  evaluate(network, testSamples);
+  const showCount = parseInt(flags.show as string, 10) || 0;
+  evaluate(network, testSamples, showCount);
 }
 
 // --- Inspect bottleneck ---
