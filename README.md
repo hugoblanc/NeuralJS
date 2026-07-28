@@ -6,10 +6,10 @@ No libraries, no magic - just the math, made tangible.
 ## Why this exists
 
 I learned how neural networks work by watching [3Blue1Brown's deep learning series](https://www.youtube.com/playlist?list=PLZHQObOWTQDNU6R1_67000Dx_ZCJB-3pi).
-These videos are the best theoretical explanation I've found - go watch them first if you haven't.
+Those videos are the best theoretical explanation I have found - go watch them first if you haven't.
 
-But after watching, I wanted to **build one myself** to make sure I actually understood.
-This repo is the result: a complete neural network implemented from scratch, with a step-by-step tutorial that mirrors the progression of those videos.
+But after watching, I wanted to **build one myself** to check that I had actually understood.
+This repo is the result: a complete neural network implemented from scratch, with a step-by-step tutorial that follows the same progression.
 
 The approach here is practical.
 Each step is a standalone file you can run, modify, and break.
@@ -35,61 +35,82 @@ npx tsx steps/06-digits.ts        # requires: npm run download-mnist
 npx tsx steps/07-autoencoder.ts
 ```
 
+## The object model
+
+A neural network maps onto objects almost too neatly, and this tutorial leans on that.
+The class hierarchy is not decoration - it is the explanation.
+
+```
+Network   ordered list of layers      forward(), backpropagate()
+  Layer   group of neurons            activate(), computeHiddenDeltas()
+ Neuron   holds one number in [0,1]   activate(), applyGradient()
+Synapse   weighted connection         source, target, weight
+```
+
+Every step redefines these classes with a little more in them than the step before.
+That growth is the curriculum: what step 04 adds on top of step 03 *is* backpropagation.
+Each file is **self-contained** - no imports from the rest of the project, so you can open any one of them and read it top to bottom.
+
+The single most useful thing to notice: `Network.forward()` is three lines and `Network.backpropagate()` is three steps.
+Everything else happens inside individual neurons that never see more than their immediate neighbours.
+
 ## The steps
 
-Each file is **self-contained** - it includes all the code it needs, no imports from the rest of the project.
-You can open any file and read it top to bottom.
-The code grows progressively: what step 04 adds on top of step 03 is exactly what backpropagation is.
-
 ### [01 - The Neuron](steps/01-neuron.ts)
-A neuron is just a number between 0 and 1.
-It takes weighted inputs, sums them, and squishes the result through sigmoid.
+A neuron is one number between 0 and 1.
+It reads its neighbours through weighted synapses, sums, adds a bias, and squishes the result through sigmoid.
+Builds `Synapse` and `Neuron`, and wires four of them by hand.
 > 3Blue1Brown: [Chapter 1, 0:00-5:00](https://www.youtube.com/watch?v=aircAruvnKk)
 
 ### [02 - The Forward Pass](steps/02-forward.ts)
-Stack neurons into layers, connect every neuron to the previous layer.
-Data flows from input to output - this is the forward pass.
-With random weights, the network outputs nonsense.
+Wiring neurons by hand does not scale, so: `Layer` and `Network`.
+Data flows from input to output. With random weights the output means nothing, but the plumbing works.
 > 3Blue1Brown: [Chapter 1, 5:00-15:00](https://www.youtube.com/watch?v=aircAruvnKk&t=300)
 
 ### [03 - The Cost Function](steps/03-cost.ts)
-How do you measure "this network is bad"?
-Sum of squared differences between output and target. That's the cost.
-Our goal: make this number as small as possible.
+How do you put a number on "this network is bad"?
+Introduces `CostFunction` with its two faces: `evaluate()` for us, `gradient()` for step 04.
+Then sweeps a single weight to show the cost landscape, and why one weight at a time is hopeless.
 > 3Blue1Brown: [Chapter 2, 0:00-6:00](https://www.youtube.com/watch?v=IHZwWFHWa-w)
 
 ### [04 - Backpropagation](steps/04-backprop.ts)
-The core algorithm. For each weight, figure out how much it contributed to the error, then nudge it the other way.
-The error flows backward through the network, layer by layer.
-Watch the network learn XOR from scratch.
+The core algorithm, and the one new thing the object graph needs: synapses that know both ends.
+Forward uses `neuron.inputs`, backward uses `neuron.outputs`.
+Blame flows right to left, with each neuron talking only to its neighbours.
+Watch a single backward pass in slow motion, then watch it learn XOR.
 > 3Blue1Brown: [Chapter 3](https://www.youtube.com/watch?v=Ilg3gGewQ5U)
 
 ### [05 - The Training Loop](steps/05-training.ts)
-Put it all together with a live progress bar.
-Experiment with the learning rate - too small and it's slow, too big and it explodes.
+Epochs, learning rates and progress bars are not the network's job, so they get their own objects: `Dataset`, `Trainer`, `ProgressBar`, `ProgressMetric`.
 ```bash
-npx tsx steps/05-training.ts xor 0.5     # default
-npx tsx steps/05-training.ts xor 5.0     # too fast?
-npx tsx steps/05-training.ts parity 0.5  # harder problem
+npx tsx steps/05-training.ts xor 0.5         # default
+npx tsx steps/05-training.ts xor 0.005       # too slow to get there
+npx tsx steps/05-training.ts xor 30          # broken: stuck at cost 0.5
+npx tsx steps/05-training.ts add 0.5 60000   # it has to invent a carry
 ```
 
 ### [06 - Recognizing Digits](steps/06-digits.ts)
-The real test: MNIST handwritten digits.
-784 pixels go in, a digit 0-9 comes out.
-The exact same problem 3Blue1Brown uses throughout his series.
+MNIST: 784 pixels in, a digit 0-9 out - the same problem 3Blue1Brown uses throughout the series.
+This is the payoff of everything above: `Neuron`, `Layer` and `Network` are copied from step 05 **unchanged**.
+Only the objects around the data are new (`Digit`, `MnistLoader`, `Classifier`, `Evaluation`).
 ```bash
 npm run download-mnist
-npx tsx steps/06-digits.ts 1000 50000    # 1000 samples, 50k iterations
+npx tsx steps/06-digits.ts 500 20000      # fast, roughly 80%
+npx tsx steps/06-digits.ts 2000 100000    # slower, roughly 90%
 ```
 
 ### [07 - The Autoencoder](steps/07-autoencoder.ts)
-Force 8 patterns through a bottleneck of 3 neurons.
-The network invents binary encoding on its own - nobody told it about binary.
-This is the foundation of representation learning.
+Force 8 patterns through a bottleneck of 3 neurons and train the network to reproduce its own input.
+`Autoencoder extends Network` - same maths, new vocabulary: `encode()`, `decode()`, `bottleneckLayer`.
+
+The obvious guess is that it invents binary: 2^3 = 8, exactly enough.
+It doesn't, and finding out why is the point of the step.
+A bottleneck neuron holds a real number, so the code is a point in a cube rather than a 3-bit word - which is exactly what an embedding is.
+The step ends by asking you to shrink the bottleneck to 2 neurons: if the code were really binary that would leave 4 slots for 8 patterns and it would have to fail, yet it usually still recovers all 8.
 
 ## The full library
 
-Beyond the tutorial, `src/` contains a clean, modular implementation:
+Beyond the tutorial, `src/` contains the same classes as a modular implementation:
 
 ```bash
 npm run build
@@ -98,6 +119,18 @@ node dist/index.js xor
 node dist/index.js mnist --samples 1000 --show 10
 node dist/index.js auto --inspect
 ```
+
+## Don't take my word for it
+
+Backpropagation is easy to get subtly wrong in a way that still trains and still looks convincing.
+The honest test is to compare its gradients against numerically estimated ones:
+
+```bash
+npm run gradcheck
+```
+
+It nudges every weight and bias by 1e-5, measures how the cost actually moves, and compares that to what backpropagation claimed.
+The two agree to about 1e-11.
 
 ## Requirements
 

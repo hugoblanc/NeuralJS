@@ -106,10 +106,9 @@ function bgColor(r: number, g: number, b: number, text: string): string {
 }
 
 const precisionHistory: number[] = [];
+const REFRESH_EVERY = 97;
 
-function displayProgress(precision: number, target: number[], result: number[], iteration: number): void {
-  precisionHistory.push(precision * 100);
-  if (precisionHistory.length > 10) precisionHistory.shift();
+function displayProgress(target: number[], result: number[], iteration: number): void {
   const avg = precisionHistory.reduce((a, b) => a + b) / precisionHistory.length;
 
   const barWidth = 40;
@@ -155,10 +154,15 @@ for (let i = 0; i < maxIterations; i++) {
   }
   precision /= sample.target.length;
 
+  precisionHistory.push(precision * 100);
+  if (precisionHistory.length > 20) precisionHistory.shift();
+
   if (debug) {
     console.log(network.toString());
-  } else {
-    displayProgress(precision, sample.target, result, i);
+  } else if (i % REFRESH_EVERY === 0) {
+    // Redrawing costs more than training does, and a stride that shares no
+    // factor with the sample count keeps the displayed sample moving.
+    displayProgress(sample.target, result, i);
   }
 
   network.backpropagate(sample.target, learningRate);
@@ -177,15 +181,14 @@ if (testSamples && testSamples.length > 0) {
 
 if (inspect) {
   const bottleneckIndex = Math.floor(network.layers.length / 2);
-  const bottleneckSize = network.layers[bottleneckIndex].neurons.length;
-  console.log(`\nBottleneck (layer ${bottleneckIndex}, ${bottleneckSize} neurons):\n`);
+  console.log(`\nBottleneck (layer ${bottleneckIndex}, ${network.bottleneckLayer.size} neurons):\n`);
 
   const inspectSamples = samples.length > 20 ? samples.slice(0, 20) : samples;
   for (const sample of inspectSamples) {
     network.forward(sample.inputs);
-    const bottleneck = network.layers[bottleneckIndex].neurons.map(n => n.activation);
+    const bottleneck = network.bottleneckLayer.activations;
     const rounded = bottleneck.map(v => Math.round(v));
-    const output = network.outputLayer.neurons.map(n => n.activation);
+    const output = network.outputLayer.activations;
 
     const inputStr = sample.inputs.length > 20
       ? `digit ${sample.target.indexOf(1)}`

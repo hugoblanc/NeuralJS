@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc",
     "train": "tsc && node dist/index.js",
+    "gradcheck": "tsc && node dist/gradcheck.js",
     "download-mnist": "bash scripts/download-mnist.sh",
     "legacy": "node index.js"
   },

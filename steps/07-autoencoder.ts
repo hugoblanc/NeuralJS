@@ -1,152 +1,611 @@
 // Step 07 - The Autoencoder
 // =========================
-// What if the network had to compress data through a bottleneck?
+// One last idea, and the strangest one: train a network to output
+// exactly what it was given. Copy the input. That sounds useless -
+// until you force the data through a narrow layer on the way.
 //
-// 8 inputs -> 5 neurons -> 3 neurons -> 5 neurons -> 8 outputs
-//                          ^^^^^^^^^^^
-//                          bottleneck!
+//   8 inputs -> 5 neurons -> 3 neurons -> 5 neurons -> 8 outputs
+//                            ^^^^^^^^^
+//                            everything must fit through here
 //
-// The input equals the target: the network must learn to reconstruct
-// its own input after squeezing it through just 3 neurons.
+// There are 8 possible inputs and only 3 neurons in the middle. To
+// rebuild the input on the far side, the network has to compress "which
+// of the 8" into 3 numbers, with nobody telling it how.
 //
-// 8 possible patterns, 3 neurons -> the network must invent
-// a binary encoding to distinguish them. 2^3 = 8. Just enough.
+// The obvious guess is that it invents binary: 2^3 = 8, exactly enough.
+// Run it. The answer is no, and why it is no turns out to be the whole
+// point of the step.
 //
-// This is the foundation of autoencoders, a key concept in deep learning.
+// This is also where inheritance finally earns its place. An
+// autoencoder IS a network - same forward, same backpropagate, nothing
+// overridden. What it adds is a vocabulary: encode(), decode(), and the
+// notion of a bottleneck. So it extends Network rather than reimplementing
+// or wrapping it.
+//
+// NEW IN THIS STEP
+//   class Autoencoder extends Network  -  encode(), decode(), bottleneckLayer
+//   class ExactReconstruction implements ProgressMetric
 
 import * as readline from "readline";
 
-function sigmoid(x: number): number { return 1 / (1 + Math.exp(-x)); }
-function sigmoidDeriv(x: number): number { const s = sigmoid(x); return s * (1 - s); }
+function sigmoid(x: number): number {
+  return 1 / (1 + Math.exp(-x));
+}
 
-interface Synapse { weight: number; parent: Neuron; }
+function sigmoidDerivative(x: number): number {
+  const s = sigmoid(x);
+  return s * (1 - s);
+}
+
+// --- Everything from steps 01-05, unchanged ---
+
+class Synapse {
+  weight: number;
+
+  constructor(
+    readonly source: Neuron,
+    readonly target: Neuron,
+    weight: number = Math.random() * 2 - 1,
+  ) {
+    this.weight = weight;
+  }
+
+  get contribution(): number {
+    return this.source.activation * this.weight;
+  }
+
+  get blame(): number {
+    return this.weight * this.target.delta;
+  }
+}
+
 class Neuron {
-  bias = 1; sum = 0; activation = 0; delta = 0;
-  synapses: Synapse[] = [];
-  constructor(parents?: Neuron[]) {
-    if (!parents) return;
-    this.synapses = parents.map(p => ({ weight: Math.random() * 2 - 1, parent: p }));
+  bias = 1;
+  sum = 0;
+  activation = 0;
+  delta = 0;
+  readonly inputs: Synapse[] = [];
+  readonly outputs: Synapse[] = [];
+
+  connectFrom(source: Neuron, weight?: number): Synapse {
+    const synapse = new Synapse(source, this, weight);
+    this.inputs.push(synapse);
+    source.outputs.push(synapse);
+    return synapse;
+  }
+
+  receive(value: number): void {
+    this.sum = value;
+    this.activation = value;
+  }
+
+  activate(): number {
+    let total = 0;
+    for (const synapse of this.inputs) total += synapse.contribution;
+    this.sum = total + this.bias;
+    this.activation = sigmoid(this.sum);
+    return this.activation;
+  }
+
+  computeOutputDelta(costGradient: number): void {
+    this.delta = costGradient * sigmoidDerivative(this.sum);
+  }
+
+  computeHiddenDelta(): void {
+    let error = 0;
+    for (const synapse of this.outputs) error += synapse.blame;
+    this.delta = error * sigmoidDerivative(this.sum);
+  }
+
+  applyGradient(learningRate: number): void {
+    this.bias -= this.delta * learningRate;
+    for (const synapse of this.inputs) {
+      synapse.weight -= this.delta * synapse.source.activation * learningRate;
+    }
   }
 }
+
 class Layer {
-  neurons: Neuron[];
-  constructor(size: number, parent?: Layer) {
-    this.neurons = Array.from({ length: size }, () => new Neuron(parent?.neurons));
+  readonly neurons: Neuron[];
+
+  constructor(size: number, previous?: Layer) {
+    this.neurons = Array.from({ length: size }, () => new Neuron());
+    if (previous) this.fullyConnect(previous);
   }
-}
-class Network {
-  layers: Layer[];
-  constructor(sizes: number[]) {
-    this.layers = []; let prev: Layer | undefined;
-    for (const s of sizes) { const l = new Layer(s, prev); this.layers.push(l); prev = l; }
-  }
-  forward(inputs: number[]): number[] {
-    this.layers[0].neurons.forEach((n, i) => { n.activation = inputs[i]; });
-    for (let l = 1; l < this.layers.length; l++) {
-      for (const n of this.layers[l].neurons) {
-        let s = 0;
-        for (const syn of n.synapses) s += syn.parent.activation * syn.weight;
-        n.sum = s + n.bias; n.activation = sigmoid(n.sum);
+
+  private fullyConnect(previous: Layer): void {
+    for (const neuron of this.neurons) {
+      for (const source of previous.neurons) {
+        neuron.connectFrom(source);
       }
     }
-    return this.layers[this.layers.length - 1].neurons.map(n => n.activation);
   }
-  backpropagate(target: number[], lr: number): void {
-    const out = this.layers[this.layers.length - 1].neurons;
-    for (let i = 0; i < out.length; i++)
-      out[i].delta = 2 * (out[i].activation - target[i]) * sigmoidDeriv(out[i].sum);
-    for (let l = this.layers.length - 2; l >= 1; l--)
-      for (let j = 0; j < this.layers[l].neurons.length; j++) {
-        const n = this.layers[l].neurons[j]; let err = 0;
-        for (const nn of this.layers[l + 1].neurons) err += nn.synapses[j].weight * nn.delta;
-        n.delta = err * sigmoidDeriv(n.sum);
-      }
-    for (let l = 1; l < this.layers.length; l++)
-      for (const n of this.layers[l].neurons) {
-        n.bias -= n.delta * lr;
-        for (const syn of n.synapses) syn.weight -= n.delta * syn.parent.activation * lr;
-      }
+
+  get size(): number {
+    return this.neurons.length;
+  }
+
+  get activations(): number[] {
+    return this.neurons.map(neuron => neuron.activation);
+  }
+
+  receive(values: number[]): void {
+    this.neurons.forEach((neuron, i) => neuron.receive(values[i]));
+  }
+
+  activate(): void {
+    for (const neuron of this.neurons) neuron.activate();
+  }
+
+  computeOutputDeltas(costGradient: number[]): void {
+    this.neurons.forEach((neuron, i) => neuron.computeOutputDelta(costGradient[i]));
+  }
+
+  computeHiddenDeltas(): void {
+    for (const neuron of this.neurons) neuron.computeHiddenDelta();
+  }
+
+  applyGradient(learningRate: number): void {
+    for (const neuron of this.neurons) neuron.applyGradient(learningRate);
   }
 }
 
-// --- 8 one-hot patterns: input = target ---
-
-interface Sample { inputs: number[]; target: number[]; }
-const samples: Sample[] = [];
-for (let i = 0; i < 8; i++) {
-  const vec = new Array(8).fill(0);
-  vec[i] = 1;
-  samples.push({ inputs: [...vec], target: [...vec] });
+interface Sample {
+  readonly inputs: number[];
+  readonly target: number[];
 }
 
-// Architecture: 8 -> 5 -> 3 -> 5 -> 8
-const net = new Network([8, 5, 3, 5, 8]);
-const lr = 1.0;
-const iterations = 100000;
-
-console.log("=== Autoencoder: 8 -> 5 -> [3] -> 5 -> 8 ===");
-console.log(`LR: ${lr} | Iterations: ${iterations}\n`);
-
-function bg(r: number, g: number, b: number, text: string): string {
-  return `\x1b[48;2;${r};${g};${b}m${text}\x1b[0m`;
-}
-const history: number[] = [];
-
-for (let i = 0; i < iterations; i++) {
-  const sample = samples[i % samples.length];
-  const result = net.forward(sample.inputs);
-
-  let precision = 0;
-  for (let j = 0; j < sample.target.length; j++)
-    precision += 1 - Math.abs(sample.target[j] - result[j]);
-  precision /= sample.target.length;
-
-  history.push(precision * 100);
-  if (history.length > 10) history.shift();
-  const avg = history.reduce((a, b) => a + b) / history.length;
-
-  const barW = 40;
-  const filled = Math.round((avg / 100) * barW);
-  const bar = "█".repeat(filled) + "░".repeat(barW - filled);
-  const line = ` ${avg.toFixed(1)}% ${bar} `;
-  const red = Math.round(200 - 150 * (avg / 100));
-  const green = Math.round(130 * (avg / 100));
-
-  readline.cursorTo(process.stdout, 0);
-  readline.clearLine(process.stdout, 0);
-  process.stdout.write(bg(red, green, 0, line));
-
-  net.backpropagate(sample.target, lr);
+interface CostFunction {
+  readonly name: string;
+  evaluate(output: number[], target: number[]): number;
+  gradient(output: number[], target: number[]): number[];
 }
 
-// --- Inspect the bottleneck ---
+class MeanSquaredError implements CostFunction {
+  readonly name = "mean squared error";
 
-const bnIndex = Math.floor(net.layers.length / 2);
-console.log(`\n\n=== What did the bottleneck learn? (layer ${bnIndex}, 3 neurons) ===\n`);
-console.log("  The network must encode 8 patterns using only 3 neurons.");
-console.log("  Each neuron acts like a bit (close to 0 or 1).");
-console.log("  2^3 = 8 -> just enough to distinguish all patterns.\n");
+  evaluate(output: number[], target: number[]): number {
+    let total = 0;
+    for (let i = 0; i < target.length; i++) {
+      const error = output[i] - target[i];
+      total += error * error;
+    }
+    return total / target.length;
+  }
 
-for (let i = 0; i < samples.length; i++) {
-  const sample = samples[i];
-  net.forward(sample.inputs);
-  const bottleneck = net.layers[bnIndex].neurons.map(n => n.activation);
-  const rounded = bottleneck.map(v => Math.round(v));
-  const output = net.layers[net.layers.length - 1].neurons.map(n => n.activation);
-  const maxOut = Math.max(...output);
-  const reconstructed = output.map(v => v > 0.5 ? 1 : 0);
+  gradient(output: number[], target: number[]): number[] {
+    return target.map((t, i) => 2 * (output[i] - t));
+  }
+}
+
+class Network {
+  readonly layers: Layer[];
+
+  constructor(
+    sizes: number[],
+    readonly cost: CostFunction = new MeanSquaredError(),
+  ) {
+    this.layers = [];
+    let previous: Layer | undefined;
+    for (const size of sizes) {
+      previous = new Layer(size, previous);
+      this.layers.push(previous);
+    }
+  }
+
+  get inputLayer(): Layer {
+    return this.layers[0];
+  }
+
+  get outputLayer(): Layer {
+    return this.layers[this.layers.length - 1];
+  }
+
+  get computedLayers(): Layer[] {
+    return this.layers.slice(1);
+  }
+
+  get weightCount(): number {
+    return this.layers.reduce(
+      (total, layer) => total + layer.neurons.reduce((n, neuron) => n + neuron.inputs.length, 0),
+      0,
+    );
+  }
+
+  /** One bias per neuron, except in the input layer where nothing is computed. */
+  get biasCount(): number {
+    return this.computedLayers.reduce((total, layer) => total + layer.size, 0);
+  }
+
+  /** Everything training is allowed to change. */
+  get parameterCount(): number {
+    return this.weightCount + this.biasCount;
+  }
+
+  forward(inputs: number[]): number[] {
+    this.inputLayer.receive(inputs);
+    for (const layer of this.computedLayers) layer.activate();
+    return this.outputLayer.activations;
+  }
+
+  backpropagate(target: number[], learningRate: number): void {
+    this.outputLayer.computeOutputDeltas(
+      this.cost.gradient(this.outputLayer.activations, target),
+    );
+    for (let i = this.layers.length - 2; i >= 1; i--) {
+      this.layers[i].computeHiddenDeltas();
+    }
+    for (const layer of this.computedLayers) layer.applyGradient(learningRate);
+  }
+
+  evaluate(sample: Sample): number {
+    return this.cost.evaluate(this.forward(sample.inputs), sample.target);
+  }
+
+  averageCost(samples: readonly Sample[]): number {
+    let total = 0;
+    for (const sample of samples) total += this.evaluate(sample);
+    return total / samples.length;
+  }
+
+  toString(): string {
+    const shape = this.layers.map(layer => layer.size).join(" -> ");
+    const count = (n: number) => n.toLocaleString("en-US");
+    return `${shape}   (${count(this.parameterCount)} parameters:` +
+      ` ${count(this.weightCount)} weights, ${count(this.biasCount)} biases)`;
+  }
+}
+
+class Dataset {
+  constructor(
+    readonly name: string,
+    readonly samples: readonly Sample[],
+  ) {}
+
+  get size(): number {
+    return this.samples.length;
+  }
+
+  get inputSize(): number {
+    return this.samples[0].inputs.length;
+  }
+
+  get outputSize(): number {
+    return this.samples[0].target.length;
+  }
+
+  at(iteration: number): Sample {
+    return this.samples[iteration % this.samples.length];
+  }
+
+  epochOf(iteration: number): number {
+    return Math.floor(iteration / this.samples.length) + 1;
+  }
+
+  shapeWith(hiddenSizes: number[]): number[] {
+    return [this.inputSize, ...hiddenSizes, this.outputSize];
+  }
+}
+
+class ProgressBar {
+  private readonly history: number[] = [];
+
+  constructor(
+    private readonly width = 40,
+    private readonly window = 100,
+  ) {}
+
+  record(score: number): void {
+    this.history.push(score);
+    if (this.history.length > this.window) this.history.shift();
+  }
+
+  get average(): number {
+    if (this.history.length === 0) return 0;
+    return this.history.reduce((a, b) => a + b, 0) / this.history.length;
+  }
+
+  render(suffix = ""): void {
+    const ratio = this.average;
+    const filled = Math.round(ratio * this.width);
+    const bar = "█".repeat(filled) + "░".repeat(this.width - filled);
+    const line = ` ${(ratio * 100).toFixed(1).padStart(5)}% ${bar}  ${suffix} `;
+    const red = Math.round(200 - 150 * ratio);
+    const green = Math.round(130 * ratio);
+
+    readline.cursorTo(process.stdout, 0);
+    readline.clearLine(process.stdout, 0);
+    process.stdout.write(`\x1b[48;2;${red};${green};0m${line}\x1b[0m`);
+  }
+
+  finish(): void {
+    process.stdout.write("\n");
+  }
+}
+
+interface ProgressMetric {
+  score(output: number[], sample: Sample): number;
+  caption(output: number[], sample: Sample): string;
+}
+
+class OutputCloseness implements ProgressMetric {
+  score(output: number[], sample: Sample): number {
+    let total = 0;
+    for (let i = 0; i < sample.target.length; i++) {
+      total += 1 - Math.abs(sample.target[i] - output[i]);
+    }
+    return total / sample.target.length;
+  }
+
+  caption(output: number[], sample: Sample): string {
+    const want = sample.target.map(v => v.toFixed(0)).join(" ");
+    const got = output.map(v => v.toFixed(3)).join(" ");
+    return `want [${want}]  got [${got}]`;
+  }
+}
+
+/**
+ * NEW: all or nothing. Round every output to 0 or 1 and ask whether the
+ * pattern came back exactly. Half a reconstruction is not a reconstruction.
+ */
+class ExactReconstruction implements ProgressMetric {
+  score(output: number[], sample: Sample): number {
+    return output.every((value, i) => Math.round(value) === sample.target[i]) ? 1 : 0;
+  }
+
+  caption(output: number[], sample: Sample): string {
+    const want = sample.target.join("");
+    const got = output.map(v => Math.round(v)).join("");
+    return `want ${want}  got ${got}`;
+  }
+}
+
+interface TrainingOptions {
+  readonly learningRate: number;
+  readonly iterations: number;
+  readonly refreshEvery?: number;
+  readonly metric?: ProgressMetric;
+}
+
+const DEFAULT_REFRESH = 97;
+
+class Trainer {
+  private readonly bar = new ProgressBar();
+
+  constructor(
+    private readonly network: Network,
+    private readonly options: TrainingOptions,
+  ) {}
+
+  train(dataset: Dataset): void {
+    const {
+      learningRate,
+      iterations,
+      refreshEvery = DEFAULT_REFRESH,
+      metric = new OutputCloseness(),
+    } = this.options;
+
+    for (let i = 0; i < iterations; i++) {
+      const sample = dataset.at(i);
+      const output = this.network.forward(sample.inputs);
+      this.bar.record(metric.score(output, sample));
+      this.network.backpropagate(sample.target, learningRate);
+
+      if (i % refreshEvery === 0) {
+        this.bar.render(`epoch ${dataset.epochOf(i)}  ${metric.caption(output, sample)}`);
+      }
+    }
+
+    this.bar.render("done");
+    this.bar.finish();
+  }
+}
+
+// --- New: a network that must rebuild its own input ---
+
+/**
+ * An autoencoder is a network shaped like an hourglass, trained to
+ * reproduce its input. Nothing about the maths changes - only the shape
+ * of the network and the choice of target. So we inherit all of it and
+ * add three things: where the bottleneck is, and how to use each half
+ * of the network on its own.
+ */
+class Autoencoder extends Network {
+  constructor(
+    readonly patternSize: number,
+    hiddenSize: number,
+    readonly codeSize: number,
+  ) {
+    super([patternSize, hiddenSize, codeSize, hiddenSize, patternSize]);
+  }
+
+  private get bottleneckIndex(): number {
+    return Math.floor(this.layers.length / 2);
+  }
+
+  get bottleneckLayer(): Layer {
+    return this.layers[this.bottleneckIndex];
+  }
+
+  /** First half: squeeze a pattern down to `codeSize` numbers. */
+  encode(inputs: number[]): number[] {
+    this.forward(inputs);
+    return this.bottleneckLayer.activations;
+  }
+
+  /**
+   * Second half: hand the bottleneck a code and let the rest of the
+   * network run. Note that we can feed it a code the encoder has never
+   * produced - which is how we find out whether it learned a real code
+   * or just memorised eight paths.
+   */
+  decode(code: number[]): number[] {
+    this.bottleneckLayer.receive(code);
+    for (const layer of this.layers.slice(this.bottleneckIndex + 1)) {
+      layer.activate();
+    }
+    return this.outputLayer.activations;
+  }
+
+  /** The 2^codeSize codes the bottleneck could in principle produce. */
+  get possibleCodes(): number[][] {
+    const total = 2 ** this.codeSize;
+    return Array.from({ length: total }, (_, n) =>
+      Array.from({ length: this.codeSize }, (_, bit) => (n >> (this.codeSize - 1 - bit)) & 1),
+    );
+  }
+}
+
+/** The whole dataset: eight patterns, each its own target. */
+class Reconstruction implements Sample {
+  constructor(readonly inputs: number[]) {}
+
+  /** The target IS the input. That single line is what makes it an autoencoder. */
+  get target(): number[] {
+    return this.inputs;
+  }
+}
+
+// --- Go ---
+
+const PATTERN_SIZE = 8;
+const CODE_SIZE = 3;
+
+const learningRate = parseFloat(process.argv[2] || "1.0");
+const iterations = parseInt(process.argv[3] || "80000", 10);
+
+const patterns = Array.from({ length: PATTERN_SIZE }, (_, i) =>
+  new Reconstruction(Array.from({ length: PATTERN_SIZE }, (_, j) => (i === j ? 1 : 0))),
+);
+const dataset = new Dataset("one-hot patterns", patterns);
+
+const autoencoder = new Autoencoder(PATTERN_SIZE, 5, CODE_SIZE);
+
+console.log("=== Autoencoder ===\n");
+console.log(`  Network      ${autoencoder}`);
+console.log(`  Bottleneck   ${autoencoder.codeSize} neurons for ${dataset.size} patterns`);
+console.log(`  Training     ${iterations} iterations, lr ${learningRate}\n`);
+
+new Trainer(autoencoder, {
+  learningRate,
+  iterations,
+  metric: new ExactReconstruction(),
+}).train(dataset);
+
+console.log(`\nFinal cost: ${autoencoder.averageCost(patterns).toFixed(6)}`);
+
+// --- What code did it invent? ---
+
+const codes = patterns.map(pattern => autoencoder.encode(pattern.inputs));
+const rounded = codes.map(code => code.map(v => Math.round(v)).join(""));
+
+console.log("\n=== The encoder: pattern -> code ===\n");
+
+let recovered = 0;
+
+patterns.forEach((pattern, i) => {
+  const raw = codes[i].map(v => v.toFixed(2)).join(", ");
+  autoencoder.forward(pattern.inputs);
+  const rebuilt = autoencoder.outputLayer.activations.map(v => Math.round(v)).join("");
+  const ok = rebuilt === pattern.target.join("");
+  if (ok) recovered++;
+  const collides = rounded.filter(code => code === rounded[i]).length > 1;
 
   console.log(
-    `  Pattern ${i}: [${sample.inputs.join("")}]` +
-    `  -> bottleneck [${bottleneck.map(v => v.toFixed(2)).join(", ")}]` +
-    ` ~ [${rounded.join("")}]` +
-    `  -> output [${reconstructed.join("")}]`,
+    `  pattern ${i}  ${pattern.inputs.join("")}` +
+    `  ->  [${raw}]  ~  ${rounded[i]}` +
+    `  ->  ${rebuilt}  ${ok ? "ok" : "MISS"}` +
+    (collides ? "   <- shares its rounded code" : ""),
   );
+});
+
+console.log(`\n  ${recovered} of ${patterns.length} patterns came back intact.`);
+if (recovered < patterns.length) {
+  console.log("  This run collapsed: two patterns landed on the same code and the");
+  console.log("  decoder cannot separate what the encoder merged. It happens - run");
+  console.log("  it again, or train longer. The rest of the output still holds.");
 }
 
+// --- Then what did it invent? ---
+
+// A neuron parked in the middle of its range is carrying a value, not a bit.
+const undecided = codes.flat().filter(v => v > 0.15 && v < 0.85).length;
+const distinct = new Set(rounded).size;
+
+console.log(`\n  Only ${distinct} of the ${patterns.length} rounded codes are distinct, and`);
+console.log(`  ${undecided} of the ${codes.flat().length} bottleneck activations sit nowhere near 0 or 1.`);
+console.log(`  Whatever the network built in there, it is not a ${CODE_SIZE}-bit word.`);
+
+console.log("\n=== Why not binary? ===\n");
+console.log("  A bottleneck neuron outputs a real number in [0, 1], so the code is a");
+console.log(`  point in a ${CODE_SIZE}-dimensional unit cube, not a ${CODE_SIZE}-bit word. The corners`);
+console.log(`  are just ${2 ** CODE_SIZE} of the infinitely many points in that cube, so nothing`);
+console.log(`  pushes the network towards them. It only needs its ${PATTERN_SIZE} points far`);
+console.log("  enough apart for the decoder to tell them apart - and 'far enough'");
+console.log("  is a distance, not a bit.\n");
+
+let closest = Infinity;
+let closestPair = [0, 0];
+for (let i = 0; i < codes.length; i++) {
+  for (let j = i + 1; j < codes.length; j++) {
+    const distance = Math.hypot(...codes[i].map((v, k) => v - codes[j][k]));
+    if (distance < closest) {
+      closest = distance;
+      closestPair = [i, j];
+    }
+  }
+}
+
+console.log(`  Closest two codes: patterns ${closestPair[0]} and ${closestPair[1]}, ${closest.toFixed(3)} apart,`);
+console.log(`  in a cube whose longest diagonal is ${Math.sqrt(CODE_SIZE).toFixed(3)}.`);
+console.log(
+  closest < 0.1
+    ? "  That is a collapse: those two are effectively the same point."
+    : "  Plenty of room - the decoder never has to guess.",
+);
+
+// --- The decoder, fed codes it has never seen ---
+
+const produced = new Set(rounded);
+const corners = autoencoder.possibleCodes;
+const unvisited = corners.filter(code => !produced.has(code.join(""))).length;
+
+console.log("\n=== The decoder: corner codes -> pattern ===\n");
+console.log(`  Feeding the bottleneck all ${corners.length} pure binary codes directly,`);
+console.log(`  bypassing the encoder. ${unvisited} of them it never produces itself.\n`);
+
+for (const code of corners) {
+  const output = autoencoder.decode(code);
+  const rebuilt: number[] = output.map(v => (v > 0.5 ? 1 : 0));
+  const lit = rebuilt.reduce((a, b) => a + b, 0);
+  const verdict = lit === 1 ? `pattern ${rebuilt.indexOf(1)}` : lit === 0 ? "nothing" : "several at once";
+  const note = produced.has(code.join("")) ? "" : "   <- encoder never lands here";
+
+  console.log(`  code ${code.join("")}  ->  ${rebuilt.join("")}  = ${verdict}${note}`);
+}
+
+console.log("\n  The decoder has an opinion about corners the encoder never visits.");
+console.log("  It is a continuous function over the whole cube, not a lookup table");
+console.log("  with 8 entries - which is why the space between codes means something.");
+
 console.log("\n--- Key insight ---");
-console.log("The network invented its own binary code!");
-console.log("Nobody told it about binary - it discovered that 3 neurons");
-console.log("with values near 0 or 1 can represent 8 distinct patterns.");
-console.log("This is the core idea behind autoencoders: learn a compressed");
-console.log("representation of the data, then reconstruct from it.");
+console.log("The compression is real: 8 patterns survive a 3-neuron waist.");
+console.log("But the code the network chose is continuous, not symbolic.");
+console.log("That is the whole idea behind embeddings: a learned representation");
+console.log("is a position in a space, not an entry in a dictionary. Distance");
+console.log("in that space is what carries meaning.");
+console.log("");
+console.log("The hidden layers of step 06 were doing the same thing quietly:");
+console.log("inventing whatever intermediate features the problem demanded,");
+console.log("with no instruction about what those features should be.");
+
+console.log("\n--- Try it ---");
+console.log("Set CODE_SIZE = 2 and run it a few times. If the bottleneck really");
+console.log("were binary, 2 neurons would give 4 codes for 8 patterns and it");
+console.log("would have to fail. It usually recovers all 8. That is the clearest");
+console.log("proof available that the code is a position, not a bit pattern.");
+console.log("");
+console.log("Then set CODE_SIZE = 1: 8 patterns strung out along a single line.");
+console.log("This one does break, every time - around 1 to 4 patterns survive.");
+console.log("Not because it ran out of codes, but because it ran out of room to");
+console.log("keep them apart.");

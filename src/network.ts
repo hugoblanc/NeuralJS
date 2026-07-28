@@ -1,97 +1,83 @@
 import { Layer } from './layer';
 import { ActivationFn, sigmoid } from './activation';
+import { CostFunction, MeanSquaredError } from './cost';
 
 export class Network {
-  layers: Layer[];
-  private activation: ActivationFn;
+  readonly layers: Layer[];
 
-  constructor(sizes: number[], activation: ActivationFn = sigmoid) {
-    this.activation = activation;
+  constructor(
+    sizes: number[],
+    private readonly activation: ActivationFn = sigmoid,
+    readonly cost: CostFunction = new MeanSquaredError(),
+  ) {
     this.layers = [];
-    let prev: Layer | undefined;
+    let previous: Layer | undefined;
     for (const size of sizes) {
-      const layer = new Layer(size, prev);
-      this.layers.push(layer);
-      prev = layer;
+      previous = new Layer(size, previous);
+      this.layers.push(previous);
     }
   }
 
-  forward(inputs: number[]): number[] {
-    // Input layer: store raw values, no activation function
-    const inputNeurons = this.layers[0].neurons;
-    for (let i = 0; i < inputNeurons.length; i++) {
-      inputNeurons[i].activation = inputs[i];
-      inputNeurons[i].sum = inputs[i];
-    }
-
-    // Hidden & output layers: weighted sum + bias -> activation function
-    for (let l = 1; l < this.layers.length; l++) {
-      for (const neuron of this.layers[l].neurons) {
-        let sum = 0;
-        for (const synapse of neuron.synapses) {
-          sum += synapse.parent.activation * synapse.weight;
-        }
-        neuron.sum = sum + neuron.bias;
-        neuron.activation = this.activation.apply(neuron.sum);
-      }
-    }
-
-    return this.outputLayer.neurons.map(n => n.activation);
-  }
-
-  // MSE cost = mean((activation - target)^2)
-  // dCost/dActivation = 2 * (activation - target)
-  backpropagate(target: number[], learningRate: number): void {
-    // Step 1 - Output layer deltas
-    // delta = dCost/dActivation * dActivation/dSum
-    const outputNeurons = this.outputLayer.neurons;
-    for (let i = 0; i < outputNeurons.length; i++) {
-      const neuron = outputNeurons[i];
-      const costGradient = 2 * (neuron.activation - target[i]);
-      neuron.delta = costGradient * this.activation.derivative(neuron.sum);
-    }
-
-    // Step 2 - Hidden layer deltas (right to left)
-    // Each neuron's error = sum of (weight * delta) from the next layer
-    for (let l = this.layers.length - 2; l >= 1; l--) {
-      const layer = this.layers[l];
-      const nextLayer = this.layers[l + 1];
-      for (let j = 0; j < layer.neurons.length; j++) {
-        const neuron = layer.neurons[j];
-        let error = 0;
-        for (const nextNeuron of nextLayer.neurons) {
-          error += nextNeuron.synapses[j].weight * nextNeuron.delta;
-        }
-        neuron.delta = error * this.activation.derivative(neuron.sum);
-      }
-    }
-
-    // Step 3 - Update weights and biases against the gradient
-    for (let l = 1; l < this.layers.length; l++) {
-      for (const neuron of this.layers[l].neurons) {
-        neuron.bias -= neuron.delta * learningRate;
-        for (const synapse of neuron.synapses) {
-          synapse.weight -= neuron.delta * synapse.parent.activation * learningRate;
-        }
-      }
-    }
+  get inputLayer(): Layer {
+    return this.layers[0];
   }
 
   get outputLayer(): Layer {
     return this.layers[this.layers.length - 1];
   }
 
+  /** Every layer except the input one - the ones that actually compute. */
+  get computedLayers(): Layer[] {
+    return this.layers.slice(1);
+  }
+
   get bottleneckLayer(): Layer {
     return this.layers[Math.floor(this.layers.length / 2)];
   }
 
+  get parameterCount(): number {
+    return this.computedLayers.reduce(
+      (total, layer) =>
+        total + layer.size + layer.neurons.reduce((n, neuron) => n + neuron.inputs.length, 0),
+      0,
+    );
+  }
+
+  /** Values enter on the left, activations ripple right. */
+  forward(inputs: number[]): number[] {
+    this.inputLayer.receive(inputs);
+    for (const layer of this.computedLayers) layer.activate(this.activation);
+    return this.outputLayer.activations;
+  }
+
+  /**
+   * The same shape as forward(), reversed. Call it right after forward():
+   * it reads the sums and activations that pass left behind.
+   */
+  backpropagate(target: number[], learningRate: number): void {
+    // 1. The output layer is the only one the cost function can talk to.
+    this.outputLayer.computeOutputDeltas(
+      this.cost.gradient(this.outputLayer.activations, target),
+      this.activation,
+    );
+
+    // 2. Blame travels right to left. Order matters: a layer can only
+    //    compute its deltas once the layer it feeds already has its own.
+    for (let i = this.layers.length - 2; i >= 1; i--) {
+      this.layers[i].computeHiddenDeltas(this.activation);
+    }
+
+    // 3. Now every neuron knows its delta, so every neuron can fix itself.
+    for (const layer of this.computedLayers) layer.applyGradient(learningRate);
+  }
+
   toString(): string {
     return this.layers.map((layer, i) => {
-      const neurons = layer.neurons.map((n, j) => {
-        const weights = n.synapses.map(s => s.weight.toFixed(4)).join(', ');
-        return `  Neuron ${j}: act=${n.activation.toFixed(4)} bias=${n.bias.toFixed(4)} w=[${weights}]`;
+      const neurons = layer.neurons.map((neuron, j) => {
+        const weights = neuron.inputs.map(s => s.weight.toFixed(4)).join(', ');
+        return `  Neuron ${j}: act=${neuron.activation.toFixed(4)} bias=${neuron.bias.toFixed(4)} w=[${weights}]`;
       }).join('\n');
-      return `Layer ${i} (${layer.neurons.length} neurons):\n${neurons}`;
+      return `Layer ${i} (${layer.size} neurons):\n${neurons}`;
     }).join('\n\n');
   }
 }
