@@ -47,8 +47,9 @@ Network   ordered list of layers      forward(), backpropagate()
 Synapse   weighted connection         source, target, weight
 ```
 
-Every step redefines these classes with a little more in them than the step before.
+Steps 01 to 04 redefine these classes with a little more in them each time.
 That growth is the curriculum: what step 04 adds on top of step 03 *is* backpropagation.
+Steps 05 to 07 then reuse the step-04 versions completely unchanged, which is the whole point of those steps: scale and new problems come from the objects you put *around* the network, not from the network.
 Each file is **self-contained** - no imports from the rest of the project, so you can open any one of them and read it top to bottom.
 
 The single most useful thing to notice: `Network.forward()` is three lines and `Network.backpropagate()` is three steps.
@@ -92,7 +93,8 @@ npx tsx steps/05-training.ts add 0.5 60000   # it has to invent a carry
 ### [06 - Recognizing Digits](steps/06-digits.ts)
 MNIST: 784 pixels in, a digit 0-9 out - the same problem 3Blue1Brown uses throughout the series.
 This is the payoff of everything above: `Neuron`, `Layer` and `Network` are copied from step 05 **unchanged**.
-Only the objects around the data are new (`Digit`, `MnistLoader`, `Classifier`, `Evaluation`).
+Only the objects around the data are new: `Digit`, `MnistLoader`, `Classifier`, `Evaluation`, and a second `ProgressMetric`.
+That last one matters more than it looks - measuring "how close are the ten numbers" rates a network that answers 0 to everything at 90%, so step 06 measures whether the right digit won instead.
 ```bash
 npm run download-mnist
 npx tsx steps/06-digits.ts 500 20000      # fast, roughly 80%
@@ -106,7 +108,7 @@ Force 8 patterns through a bottleneck of 3 neurons and train the network to repr
 The obvious guess is that it invents binary: 2^3 = 8, exactly enough.
 It doesn't, and finding out why is the point of the step.
 A bottleneck neuron holds a real number, so the code is a point in a cube rather than a 3-bit word - which is exactly what an embedding is.
-The step ends by asking you to shrink the bottleneck to 2 neurons: if the code were really binary that would leave 4 slots for 8 patterns and it would have to fail, yet it usually still recovers all 8.
+The step ends by asking you to shrink the bottleneck to 2 neurons: if the code were really binary that would cap it at 4 of the 8 patterns, yet it gets all 8 in roughly 6 runs out of 10.
 
 ## The full library
 

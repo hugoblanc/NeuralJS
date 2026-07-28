@@ -387,8 +387,11 @@ interface TrainingOptions {
 const DEFAULT_REFRESH = 97;
 
 /**
- * Drives a network through a dataset. This is stochastic gradient descent
- * with a batch size of one: every single sample updates the weights.
+ * Drives a network through a dataset, one sample at a time: every single
+ * sample updates the weights, rather than averaging a gradient over a batch
+ * first. Strictly this is online gradient descent - the samples are visited
+ * in a fixed cycle, so there is nothing stochastic about the order. Real
+ * training reshuffles between epochs, which matters more than it sounds.
  */
 class Trainer {
   private readonly bar = new ProgressBar();
@@ -507,15 +510,17 @@ console.log(`\n  ${correct}/${dataset.size} correct\n`);
 console.log("--- Key insight ---");
 console.log("The learning rate is the size of each downhill step, and there is");
 console.log("no universally correct value. Run the sweep below before assuming");
-console.log("you know what 'too big' means: on XOR, a rate of 8 beats the");
-console.log("default, and things only fall apart somewhere past 20. A rate that");
-console.log("is reckless on one problem is timid on another - which is why");
-console.log("finding it is half the job.");
+console.log("you know what 'too big' means: on XOR a rate of 8 still beats the");
+console.log("default, by 10 or 12 it becomes a coin flip, and past 15 it usually");
+console.log("fails outright. Note that there is no clean threshold - the same");
+console.log("rate can solve one run and wreck the next, because where you start");
+console.log("matters as much as how big your steps are.");
 
 console.log("\n--- Try it ---");
 console.log("npx tsx steps/05-training.ts xor 0.5         default, converges cleanly");
 console.log("npx tsx steps/05-training.ts xor 0.005       too slow: 30000 updates is not enough");
-console.log("npx tsx steps/05-training.ts xor 8.0         surprisingly good - try to predict this first");
+console.log("npx tsx steps/05-training.ts xor 8.0         surprisingly good - predict this before running it");
+console.log("npx tsx steps/05-training.ts xor 12          a coin flip: run it three times");
 console.log("npx tsx steps/05-training.ts xor 30          broken: it lands at cost 0.5 and stays");
 console.log("npx tsx steps/05-training.ts parity 0.5      harder: 4-bit parity");
 console.log("npx tsx steps/05-training.ts add 0.5 60000   hardest: it must invent a carry");

@@ -447,8 +447,12 @@ class Autoencoder extends Network {
     return this.outputLayer.activations;
   }
 
-  /** The 2^codeSize codes the bottleneck could in principle produce. */
-  get possibleCodes(): number[][] {
+  /**
+   * The 2^codeSize corners of the code cube: the only codes the bottleneck
+   * could produce if it really were binary. It is not, so these are just
+   * 2^codeSize convenient points out of infinitely many.
+   */
+  get cornerCodes(): number[][] {
     const total = 2 ** this.codeSize;
     return Array.from({ length: total }, (_, n) =>
       Array.from({ length: this.codeSize }, (_, bit) => (n >> (this.codeSize - 1 - bit)) & 1),
@@ -519,31 +523,8 @@ patterns.forEach((pattern, i) => {
   );
 });
 
-console.log(`\n  ${recovered} of ${patterns.length} patterns came back intact.`);
-if (recovered < patterns.length) {
-  console.log("  This run collapsed: two patterns landed on the same code and the");
-  console.log("  decoder cannot separate what the encoder merged. It happens - run");
-  console.log("  it again, or train longer. The rest of the output still holds.");
-}
-
-// --- Then what did it invent? ---
-
-// A neuron parked in the middle of its range is carrying a value, not a bit.
-const undecided = codes.flat().filter(v => v > 0.15 && v < 0.85).length;
-const distinct = new Set(rounded).size;
-
-console.log(`\n  Only ${distinct} of the ${patterns.length} rounded codes are distinct, and`);
-console.log(`  ${undecided} of the ${codes.flat().length} bottleneck activations sit nowhere near 0 or 1.`);
-console.log(`  Whatever the network built in there, it is not a ${CODE_SIZE}-bit word.`);
-
-console.log("\n=== Why not binary? ===\n");
-console.log("  A bottleneck neuron outputs a real number in [0, 1], so the code is a");
-console.log(`  point in a ${CODE_SIZE}-dimensional unit cube, not a ${CODE_SIZE}-bit word. The corners`);
-console.log(`  are just ${2 ** CODE_SIZE} of the infinitely many points in that cube, so nothing`);
-console.log(`  pushes the network towards them. It only needs its ${PATTERN_SIZE} points far`);
-console.log("  enough apart for the decoder to tell them apart - and 'far enough'");
-console.log("  is a distance, not a bit.\n");
-
+// How close do the two nearest codes sit? If two patterns were mapped to
+// essentially the same point, the decoder has no way to tell them apart.
 let closest = Infinity;
 let closestPair = [0, 0];
 for (let i = 0; i < codes.length; i++) {
@@ -556,8 +537,56 @@ for (let i = 0; i < codes.length; i++) {
   }
 }
 
+console.log(`\n  ${recovered} of ${patterns.length} patterns came back intact.`);
+if (recovered < patterns.length) {
+  console.log(`  ${patterns.length - recovered} did not, so this run did not fully solve the problem.`);
+  console.log(
+    closest < 0.1
+      ? `  Patterns ${closestPair[0]} and ${closestPair[1]} were mapped to the same point, and the decoder` +
+        "\n  cannot separate what the encoder merged."
+      : "  The codes are all distinct, so this is under-training rather than a\n  collapse: the decoder has not finished learning to read them.",
+  );
+  console.log("  Either way, run it again or train longer. The rest still holds.");
+}
+
+// The decisive one, and it appears on its own when you shrink CODE_SIZE:
+// a binary code of n bits has 2^n slots, so recovering more patterns than
+// that settles the question without any interpretation.
+if (recovered > 2 ** CODE_SIZE) {
+  console.log(`\n  Note that ${recovered} patterns came through a bottleneck with only`);
+  console.log(`  ${2 ** CODE_SIZE} binary codes available. Whatever it is storing in there, it is`);
+  console.log(`  not bits: no ${CODE_SIZE}-bit code could have carried them.`);
+}
+
+// --- Then what did it invent? ---
+
+// A neuron parked in the middle of its range is carrying a value, not a bit.
+// This is the sound evidence: the count of distinct rounded codes cannot
+// exceed 2^CODE_SIZE, so a low number there would prove nothing on its own.
+const activations = codes.flat();
+const undecided = activations.filter(v => v > 0.15 && v < 0.85).length;
+const distinct = new Set(rounded).size;
+
+console.log(`\n  ${undecided} of the ${activations.length} bottleneck activations sit nowhere near 0 or 1.`);
+
+// Rounding can never yield more than 2^CODE_SIZE distinct codes, so only say
+// something when it loses patterns the corners could actually have held.
+if (distinct < Math.min(patterns.length, 2 ** CODE_SIZE)) {
+  console.log(`  And rounding to bits collapses the ${patterns.length} codes down to ${distinct}, fewer even`);
+  console.log(`  than the ${2 ** CODE_SIZE} corners available, so the bits alone could not tell them apart.`);
+}
+console.log(`  Whatever the network built in there, it is not a ${CODE_SIZE}-bit word.`);
+
+console.log("\n=== Why not binary? ===\n");
+console.log("  Each bottleneck neuron outputs a real number in [0, 1], so a code is a");
+console.log(`  point in ${CODE_SIZE}-dimensional space, not a ${CODE_SIZE}-bit word. The all-0-or-1`);
+console.log(`  corners are just ${2 ** CODE_SIZE} of the infinitely many points available, so nothing`);
+console.log(`  pushes the network towards them. It only needs its ${PATTERN_SIZE} points far`);
+console.log("  enough apart for the decoder to tell them apart - and 'far enough'");
+console.log("  is a distance, not a bit.\n");
+
 console.log(`  Closest two codes: patterns ${closestPair[0]} and ${closestPair[1]}, ${closest.toFixed(3)} apart,`);
-console.log(`  in a cube whose longest diagonal is ${Math.sqrt(CODE_SIZE).toFixed(3)}.`);
+console.log(`  in a space whose longest diagonal is ${Math.sqrt(CODE_SIZE).toFixed(3)}.`);
 console.log(
   closest < 0.1
     ? "  That is a collapse: those two are effectively the same point."
@@ -567,7 +596,7 @@ console.log(
 // --- The decoder, fed codes it has never seen ---
 
 const produced = new Set(rounded);
-const corners = autoencoder.possibleCodes;
+const corners = autoencoder.cornerCodes;
 const unvisited = corners.filter(code => !produced.has(code.join(""))).length;
 
 console.log("\n=== The decoder: corner codes -> pattern ===\n");
@@ -584,13 +613,23 @@ for (const code of corners) {
   console.log(`  code ${code.join("")}  ->  ${rebuilt.join("")}  = ${verdict}${note}`);
 }
 
-console.log("\n  The decoder has an opinion about corners the encoder never visits.");
+if (unvisited > 0) {
+  console.log("\n  The decoder has an opinion even about corners the encoder never visits.");
+} else {
+  console.log("\n  The decoder answers for every corner, and it would answer just as");
+  console.log("  readily for any point in between.");
+}
 console.log("  It is a continuous function over the whole cube, not a lookup table");
-console.log("  with 8 entries - which is why the space between codes means something.");
+console.log(`  with ${corners.length} entries - which is why the space between codes means something.`);
 
 console.log("\n--- Key insight ---");
-console.log("The compression is real: 8 patterns survive a 3-neuron waist.");
-console.log("But the code the network chose is continuous, not symbolic.");
+if (recovered === patterns.length) {
+  console.log(`The compression is real: ${patterns.length} patterns survive a ${CODE_SIZE}-neuron waist.`);
+} else {
+  console.log(`This run only got ${recovered} of ${patterns.length} patterns through the ${CODE_SIZE}-neuron waist,`);
+  console.log("but the shape of what it learned is the same either way.");
+}
+console.log("The code the network chose is continuous, not symbolic.");
 console.log("That is the whole idea behind embeddings: a learned representation");
 console.log("is a position in a space, not an entry in a dictionary. Distance");
 console.log("in that space is what carries meaning.");
@@ -602,8 +641,9 @@ console.log("with no instruction about what those features should be.");
 console.log("\n--- Try it ---");
 console.log("Set CODE_SIZE = 2 and run it a few times. If the bottleneck really");
 console.log("were binary, 2 neurons would give 4 codes for 8 patterns and it");
-console.log("would have to fail. It usually recovers all 8. That is the clearest");
-console.log("proof available that the code is a position, not a bit pattern.");
+console.log("could never recover more than 4. It gets all 8 more often than not -");
+console.log("roughly 6 runs in 10, so you will see both outcomes. Even the runs");
+console.log("that fall short beat the 4 that a 2-bit code would cap you at.");
 console.log("");
 console.log("Then set CODE_SIZE = 1: 8 patterns strung out along a single line.");
 console.log("This one does break, every time - around 1 to 4 patterns survive.");
